@@ -48,6 +48,7 @@ EmpaquetadoIADFull/
   - `pythonnet` (`pip install pythonnet`) — necesario para `single_adq.py` y `ad_temp.py`.
 - **Thorlabs CCS200 driver** instalado (deja su DLL interop en `C:\Program Files (x86)\Microsoft.NET\Primary Interop Assemblies\`).
 - **iad.exe** de Scott Prahl dentro de `IADSCOTT/` (necesario para `batch_IAD.py`).
+- Los scripts usan como plantilla el sample-F.rtx del directorio raíz para los parámetros necesarios, como el diámetro del haz, estándares de reflectancia, etc. M_R_data y M_R_tiempo_data.csv aún se necesitan colocar manualmente, extrayendolos de la carpeta de mediciones sujeto a sujeto.
 
 > `batch_IAD.py`, `viz_mr_temporal.py` y `viz_iad_temporal.py` **no requieren** el espectrofotómetro ni pythonnet. Solo necesitan los CSV de datos.
 
