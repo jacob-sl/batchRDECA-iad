@@ -1,8 +1,8 @@
-# demasiado-iad
+# Recuperación de Espectros de coeficiente de absorción en tanda.
 
-Pipeline de adquisición espectral y reconstrucción de propiedades ópticas de tejido biológico mediante el método **Inverse Adding-Doubling (IAD)** de Scott Prahl.
+Pipeline de adquisición espectral y reconstrucción de propiedades ópticas de tejido biológico mediante el método **Inverse Adding-Doubling (IAD)** de Scott Prahl, y tomando como referencia el trabajo de B. Quistián y L. Sánchez, optimizado para las necesidades de L. Aguilar y su servidor.
 
-El sistema conecta un espectrofotómetro **Thorlabs CCS200** con el ejecutable `iad.exe` para obtener los coeficientes de absorción (`mu_a`) de muestras de piel humana in vivo, dados el coeficiente de scattering reducido (`mu_s'`) y factor de anisotropía (`g`).
+El sistema conecta un espectrofotómetro **Thorlabs CCS200** con el ejecutable `iad.exe` para obtener espectros de reflectancia. Posteriormente, se realiza un procesado utilizando el programa IAD de Scott Prahl, con el objetivo último de los coeficientes de absorción (`mu_a`) de muestras de piel humana in vivo, dados el coeficiente de scattering reducido (`mu_s'`) y factor de anisotropía (`g`). Estos scripts permiten hacer la recuperación en el espectro completo para una sola medición y para una serie de las mismas, así como realizar una reconstrucción temporal para observar cambios en los `mu_a` debido a fenómenos dinámicos. 
 
 ---
 
@@ -32,7 +32,7 @@ EmpaquetadoIADFull/
 └── .gitignore
 ```
 
-> Las carpetas `IADSCOTT/`, `IAD_run/` y `Mediciones/` están en `.gitignore` porque contienen binarios, datos generados o datos sensibles de sujetos.
+> Las carpetas `IADSCOTT/`, `IAD_run/` y `Mediciones/` están en `.gitignore` porque contienen binarios, datos generados o datos sensibles de sujetos. Es muy importante destacar que los contenidos del .zip descargable del repositorio de Scott Prahl deben estar aquí. el .rxt que viene por defecto se puede ignorar, ya que el que se utiliza como plantilla para el procesado en tanda es el que está en el directorio raíz del proyecto.
 
 ---
 
