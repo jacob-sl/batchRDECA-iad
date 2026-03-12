@@ -2,7 +2,7 @@
 
 Pipeline de adquisición espectral y reconstrucción de propiedades ópticas de tejido biológico mediante el método **Inverse Adding-Doubling (IAD)** de Scott Prahl.
 
-El sistema conecta un espectrofotómetro **Thorlabs CCS200** con el ejecutable `iad.exe` para obtener los coeficientes de absorción (`mu_a`), scattering reducido (`mu_s'`) y factor de anisotropía (`g`) de muestras de piel humana in vivo.
+El sistema conecta un espectrofotómetro **Thorlabs CCS200** con el ejecutable `iad.exe` para obtener los coeficientes de absorción (`mu_a`) de muestras de piel humana in vivo, dados el coeficiente de scattering reducido (`mu_s'`) y factor de anisotropía (`g`).
 
 ---
 
