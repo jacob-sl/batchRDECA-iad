@@ -35,15 +35,16 @@ USAR_MODO_RAPIDO = True
 # Mostrar o no el comando completo por cada lambda (Estético)
 MOSTRAR_COMANDOS = False
 # ── TOGGLE PRINCIPAL, UN SOLO ESPECTRO O UNA TANDA CON MARCAS TEMPORALES ──────────────────────────────────────────────────────────
-MODO_TEMPORAL = True   # False → M_R_data.csv (un espectro)
+MODO_TEMPORAL = False   # False → M_R_data.csv (un espectro)
                         # True  → M_R_tiempo_data.csv (serie temporal)
 
 # Solo se usa cuando MODO_TEMPORAL = True
 CSV_TEMPORAL_NAME = "M_R_tiempo_data.csv"
 CSV_SALIDA_TEMPORAL = "IAD_run/resumen_iad_temporal.csv"
-MAX_MEDICIONES = None   # None = todas; (CANTIDAD DE ESPECTROS A PROCESAR)
-PASO_MEDICION  = 1      # 1 = todas, 10 = 1 de cada 10 (submuestreo temporal)
-WORKERS        = os.cpu_count()-2 or 4   # detecta núcleos automáticamente
+INICIO_MEDICION = 22    # Descartar las primeras N mediciones (señal basura)
+MAX_MEDICIONES  = None    # None = todas; (CANTIDAD DE ESPECTROS A PROCESAR, después de INICIO)
+VENTANA_PROMEDIO = 5    # 1 = sin promediar; N > 1 = promediar N mediciones consecutivas
+WORKERS        = os.cpu_count()-1 or 4   # detecta núcleos automáticamente
 
 
 # ============================================================
@@ -346,6 +347,7 @@ def _correr_iad_una_lambda(
     med_id: int = 0,
 ) -> dict:
     """Ejecuta IAD para una sola (lambda, reflectancia) y devuelve el dict de resultado."""
+    reflectance = max(reflectance, 1e-4)
     mu_sp_mm = mu_sp_laura_jacques_mm(wavelength)
     g_valor = G_FIJO if USAR_G_FIJO else g_ma_et_al(wavelength)
 
@@ -465,9 +467,28 @@ def main():
         mediciones = leer_csv_mr_temporal(csv_temporal_path)
 
         ids_medicion = sorted(mediciones.keys())
+        ids_medicion = [m for m in ids_medicion if m >= INICIO_MEDICION]
         if MAX_MEDICIONES is not None:
             ids_medicion = ids_medicion[:MAX_MEDICIONES]
-        ids_medicion = ids_medicion[::PASO_MEDICION]
+        if VENTANA_PROMEDIO > 1:
+            grupos = [ids_medicion[i:i+VENTANA_PROMEDIO]
+                      for i in range(0, len(ids_medicion), VENTANA_PROMEDIO)]
+            mediciones_prom = {}
+            for grupo in grupos:
+                rep_id = grupo[0]
+                tiempo_prom = sum(mediciones[m]["tiempo"] for m in grupo) / len(grupo)
+                wls = [wl for wl, _ in mediciones[grupo[0]]["espectro"]]
+                n = len(grupo)
+                refs_prom = [
+                    sum(mediciones[m]["espectro"][j][1] for m in grupo) / n
+                    for j in range(len(wls))
+                ]
+                mediciones_prom[rep_id] = {
+                    "tiempo": tiempo_prom,
+                    "espectro": list(zip(wls, refs_prom)),
+                }
+            ids_medicion = [g[0] for g in grupos]
+            mediciones = mediciones_prom
 
         total_med = len(ids_medicion)
 

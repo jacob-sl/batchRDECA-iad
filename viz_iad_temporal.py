@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.widgets import Button, Slider
 import matplotlib.animation as animation
 
@@ -30,12 +30,12 @@ PARAM = "mu_a_mm-1"
 PARAM_LABEL = "mu_a (1/mm)"
 
 # Rango de longitudes de onda para visualización (None = sin truncar)
-LAMBDA_VIS_MIN = 500   # ej. 500
-LAMBDA_VIS_MAX = 600   # ej. 600
+LAMBDA_VIS_MIN = 520   # ej. 500
+LAMBDA_VIS_MAX = 580   # ej. 600
 
 # Rango de espectros a visualizar por índice (1-based, None = sin límite)
-ESPECTRO_INICIO = 1    # ej. 50  → empieza en el espectro 50
-ESPECTRO_FIN    = None # ej. 200 → termina en el espectro 200
+ESPECTRO_INICIO = None    # ej. 50  → empieza en el espectro 50
+ESPECTRO_FIN    = 30 # ej. 200 → termina en el espectro 200
 
 # Número de espectros consecutivos a promediar para el waterfall 3D
 PROMEDIO_ESPECTROS = 1
@@ -103,15 +103,14 @@ tiempos_avg = np.array([
 fig_3d = plt.figure(figsize=(12, 8))
 ax3d = fig_3d.add_subplot(111, projection="3d")
 
-# Gradiente azul: claro → saturado
-colores_azul_3d = [
-    mcolors.to_rgba((0.15, 0.35 + 0.50 * t, 1.0))
-    for t in np.linspace(0, 1, n_grupos)
-]
+# lila claro → rojo intenso por tiempo; grosor 0.5 → 2.0
+_cmap = LinearSegmentedColormap.from_list("lila_rojo", ["#C8A0D4", "#CC0000"])
+ts_norm = np.linspace(0, 1, n_grupos)
+lws = np.linspace(1, 1.5, n_grupos)
 
 for i in range(n_grupos):
     ax3d.plot(lambdas, np.full_like(lambdas, tiempos_avg[i]), espectros_avg[i],
-              linewidth=0.8, color=colores_azul_3d[i])
+              linewidth=lws[i], color=_cmap(ts_norm[i]))
 
 ax3d.set_xlabel("Longitud de onda (nm)", labelpad=10)
 ax3d.set_ylabel("Tiempo (s)", labelpad=10)
@@ -132,11 +131,8 @@ plt.subplots_adjust(bottom=0.25)
 z_min = np.nanmin(espectros) * 0.95
 z_max = np.nanmax(espectros) * 1.05
 
-# Gradiente azul para la animación (espectros individuales, sin promediar)
-colores_azul = [
-    mcolors.to_rgba((0.15, 0.35 + 0.50 * t, 1.0))
-    for t in np.linspace(0, 1, n_mediciones)
-]
+# lila → rojo por tiempo para animación
+colores_azul = [_cmap(t) for t in np.linspace(0, 1, n_mediciones)]
 
 line_anim, = ax_anim.plot(lambdas, espectros[0], linewidth=1.5, color=colores_azul[0])
 ax_anim.set_xlim(lambdas[0], lambdas[-1])
