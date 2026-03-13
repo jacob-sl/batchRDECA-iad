@@ -1,8 +1,8 @@
-# demasiado-iad
+# Recuperación de Espectros de coeficiente de absorción en tanda.
 
-Pipeline de adquisición espectral y reconstrucción de propiedades ópticas de tejido biológico mediante el método **Inverse Adding-Doubling (IAD)** de Scott Prahl.
+Pipeline de adquisición espectral y reconstrucción de propiedades ópticas de tejido biológico mediante el método **Inverse Adding-Doubling (IAD)** de Scott Prahl, y tomando como referencia el trabajo de B. Quistián y L. Sánchez, optimizado para las necesidades de L. Aguilar y su servidor.
 
-El sistema conecta un espectrofotómetro **Thorlabs CCS200** con el ejecutable `iad.exe` para obtener los coeficientes de absorción (`mu_a`), scattering reducido (`mu_s'`) y factor de anisotropía (`g`) de muestras de piel humana in vivo.
+El sistema conecta un espectrofotómetro **Thorlabs CCS200** con el ejecutable `iad.exe` para obtener espectros de reflectancia. Posteriormente, se realiza un procesado utilizando el programa IAD de Scott Prahl, con el objetivo último de los coeficientes de absorción (`mu_a`) de muestras de piel humana in vivo, dados el coeficiente de scattering reducido (`mu_s'`) y factor de anisotropía (`g`). Estos scripts permiten hacer la recuperación en el espectro completo para una sola medición y para una serie de las mismas, así como realizar una reconstrucción temporal para observar cambios en los `mu_a` debido a fenómenos dinámicos. 
 
 ---
 
@@ -32,7 +32,7 @@ EmpaquetadoIADFull/
 └── .gitignore
 ```
 
-> Las carpetas `IADSCOTT/`, `IAD_run/` y `Mediciones/` están en `.gitignore` porque contienen binarios, datos generados o datos sensibles de sujetos.
+> Las carpetas `IADSCOTT/`, `IAD_run/` y `Mediciones/` están en `.gitignore` porque contienen binarios, datos generados o datos sensibles de sujetos. Es muy importante destacar que los contenidos del .zip descargable del repositorio de Scott Prahl deben estar aquí. el .rxt que viene por defecto se puede ignorar, ya que el que se utiliza como plantilla para el procesado en tanda es el que está en el directorio raíz del proyecto.
 
 ---
 
@@ -48,6 +48,7 @@ EmpaquetadoIADFull/
   - `pythonnet` (`pip install pythonnet`) — necesario para `single_adq.py` y `ad_temp.py`.
 - **Thorlabs CCS200 driver** instalado (deja su DLL interop en `C:\Program Files (x86)\Microsoft.NET\Primary Interop Assemblies\`).
 - **iad.exe** de Scott Prahl dentro de `IADSCOTT/` (necesario para `batch_IAD.py`).
+- Los scripts usan como plantilla el sample-F.rtx del directorio raíz para los parámetros necesarios, como el diámetro del haz, estándares de reflectancia, etc. M_R_data y M_R_tiempo_data.csv aún se necesitan colocar manualmente, extrayendolos de la carpeta de mediciones sujeto a sujeto.
 
 > `batch_IAD.py`, `viz_mr_temporal.py` y `viz_iad_temporal.py` **no requieren** el espectrofotómetro ni pythonnet. Solo necesitan los CSV de datos.
 
