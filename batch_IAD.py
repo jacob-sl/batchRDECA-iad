@@ -41,7 +41,7 @@ MODO_TEMPORAL = True   # False → M_R_data.csv (un espectro)
 # Solo se usa cuando MODO_TEMPORAL = True
 CSV_TEMPORAL_NAME = "M_R_tiempo_data.csv"
 CSV_SALIDA_TEMPORAL = "IAD_run/resumen_iad_temporal.csv"
-MAX_MEDICIONES = 10   # None = todas; (CANTIDAD DE ESPECTROS A PROCESAR)
+MAX_MEDICIONES = None   # None = todas; (CANTIDAD DE ESPECTROS A PROCESAR)
 PASO_MEDICION  = 1      # 1 = todas, 10 = 1 de cada 10 (submuestreo temporal)
 WORKERS        = os.cpu_count()-2 or 4   # detecta núcleos automáticamente
 

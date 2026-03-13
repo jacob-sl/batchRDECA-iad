@@ -30,8 +30,8 @@ PARAM = "mu_a_mm-1"
 PARAM_LABEL = "mu_a (1/mm)"
 
 # Rango de longitudes de onda para visualización (None = sin truncar)
-LAMBDA_VIS_MIN = 530   # ej. 510
-LAMBDA_VIS_MAX = 580   # ej. 600
+LAMBDA_VIS_MIN = 500   # ej. 500
+LAMBDA_VIS_MAX = 600   # ej. 600
 
 # Rango de espectros a visualizar por índice (1-based, None = sin límite)
 ESPECTRO_INICIO = 1    # ej. 50  → empieza en el espectro 50

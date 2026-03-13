@@ -3,6 +3,7 @@ import atexit
 import json
 import os
 import re
+import shutil
 import sys
 import clr
 from datetime import datetime
@@ -16,10 +17,8 @@ from scipy.signal import butter, filtfilt
 # MUST HAVE pythonNET installed!
 sys.path.append(r"C:\Program Files (x86)\Microsoft.NET\Primary Interop Assemblies\\")
 clr.AddReference("Thorlabs.ccs.interop64")
-
 # Import the NET reference
 import Thorlabs.ccs.interop64
-
 # Conexión con el espectrofotómetro Thorlabs CCS200
 spec = Thorlabs.ccs.interop64.TLCCS(
     "USB0::0x1313::0x8089::M00496376::RAW",
@@ -27,16 +26,12 @@ spec = Thorlabs.ccs.interop64.TLCCS(
     Boolean(True)
 )
 print("Espectrofotómetro conectado exitosamente")
-
-
 def _cleanup_spec():
     try:
         spec.Dispose()
         print("Espectrofotómetro desconectado (cleanup automático)")
     except Exception:
         pass
-
-
 atexit.register(_cleanup_spec)
 
 # ============================================================
@@ -44,26 +39,21 @@ atexit.register(_cleanup_spec)
 # ============================================================
 
 # Tiempo de integración inicial en segundos
-TIEMPO_INTEGRACION_INICIAL = 0.1
+TIEMPO_INTEGRACION_INICIAL = 0.15
 TIEMPO_INTEGRACION = TIEMPO_INTEGRACION_INICIAL
-
 # Número de mediciones a promediar para R_0 y R_1
 NUM_MEDICIONES_PROMEDIO = 10
-
 # Tiempo de espera entre mediciones individuales para R_0 y R_1 (segundos)
 TIEMPO_ESPERA = 0.01
-
 # Número de espectros temporales a adquirir para R_M
-NUM_ESPECTROS_TEMPORAL = 500
-
+NUM_ESPECTROS_TEMPORAL = 3000
 # Reflectancia del estándar
 R_STD = 0.99
-
 # ========== PARÁMETROS DE OPTIMIZACIÓN DEL TIEMPO DE INTEGRACIÓN ==========
 # Para CCS200 en este flujo: el máximo es 1.0 (valores normalizados)
 PORCENTAJE_SATURACION = 0.95
 VALOR_MAXIMO_DETECTOR = 1.0
-UMBRAL_SATURACION = VALOR_MAXIMO_DETECTOR * PORCENTAJE_SATURACION  # 0.95
+UMBRAL_SATURACION = VALOR_MAXIMO_DETECTOR * PORCENTAJE_SATURACION 
 
 # ========== CONFIGURACIÓN DEL FILTRO BUTTERWORTH ==========
 FRECUENCIA_CORTE_BUTTER = 0.1  # Frecuencia de corte normalizada (0-1, Nyquist=1)
@@ -71,10 +61,10 @@ ORDEN_FILTRO_BUTTER = 6
 
 # ========== RANGO DE LONGITUDES DE ONDA (TRUNCADO) ==========
 LAMBDA_MIN = 500  # Longitud de onda mínima en nm
-LAMBDA_MAX = 590  # Longitud de onda máxima en nm
+LAMBDA_MAX = 600  # Longitud de onda máxima en nm
 
 # Número de muestras deseadas después del diezmado
-MUESTRAS_OBJETIVO = 200 
+MUESTRAS_OBJETIVO = 100
 
 # ============================================================
 
@@ -150,10 +140,17 @@ def tomar_serie_adquisiciones(spec, tiempo_integracion, num_mediciones, tiempo_e
     """
     print(f"Tomando {num_mediciones} mediciones para promediar...")
 
+    # setIntegrationTime una sola vez: el hardware permanece estable
+    # durante toda la serie sin ciclos de re-inicialización entre scans.
+    spec.setIntegrationTime(Double(tiempo_integracion))
+
     mediciones = []
 
     for i in range(num_mediciones):
-        intensity = tomar_medicion(spec, tiempo_integracion)
+        spec.startScan()
+        scan = Array.CreateInstance(Double, 3648)
+        spec.getScanData(scan)
+        intensity = np.fromiter(scan, dtype=np.float64, count=3648)
         mediciones.append(intensity)
 
         print(f"  Medición {i+1}/{num_mediciones} completada")
@@ -388,19 +385,26 @@ def adquirir_serie_temporal_rm(spec, tiempo_integracion, num_espectros):
     tiempos_relativos = []
     espectros_raw = []
 
-    # Configurar el tiempo de integración una sola vez antes del loop para
-    # evitar que el CCS200 realice un ciclo interno en cada iteración,
-    # lo que duplicaba el tiempo aparente por medición.
+    # Modo continuo: el sensor integra sin ciclo de limpieza entre frames,
+    # por lo que el espaciado entre mediciones es 1× tiempo de integración
+    # (en lugar de 2× que ocurre con startScan() en modo de scan único).
     spec.setIntegrationTime(Double(tiempo_integracion))
+    spec.startScanCont()
+
+    # Frame de calentamiento: el primer getScanData() siempre tarda 1×
+    # integración (el sensor aún no tenía un frame listo). Descartándolo,
+    # el timer arranca justo cuando el siguiente frame ya está en curso,
+    # por lo que la primera marca temporal queda cerca de 0.
+    _warmup = Array.CreateInstance(Double, 3648)
+    spec.getScanData(_warmup)
 
     inicio_adquisicion = time.perf_counter()
 
     for medicion in range(1, num_espectros + 1):
-        # Registrar el timestamp al INICIO del scan (antes de la exposición)
-        tiempo_relativo = time.perf_counter() - inicio_adquisicion
-        spec.startScan()
         scan = Array.CreateInstance(Double, 3648)
         spec.getScanData(scan)
+        # Timestamp registrado al completar la adquisición de cada frame
+        tiempo_relativo = time.perf_counter() - inicio_adquisicion
         intensidad_raw = np.fromiter(scan, dtype=np.float64, count=3648)
 
         tiempos_relativos.append(tiempo_relativo)
@@ -952,6 +956,12 @@ guardar_mr_tiempo_csv(
 )
 
 print(f"Archivo M_R temporal guardado en: {ruta_mr_tiempo_csv}")
+
+# Copia en directorio raíz (sin ID de sujeto)
+directorio_script = os.path.dirname(os.path.abspath(__file__))
+ruta_mr_tiempo_raiz = os.path.join(directorio_script, "M_R_tiempo_data.csv")
+shutil.copy(ruta_mr_tiempo_csv, ruta_mr_tiempo_raiz)
+print(f"Copia M_R temporal guardada en directorio raíz: {ruta_mr_tiempo_raiz}")
 
 
 # ============================================================

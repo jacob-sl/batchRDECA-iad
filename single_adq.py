@@ -33,7 +33,7 @@ atexit.register(_cleanup_spec)
 TIEMPO_INTEGRACION_INICIAL = 0.15
 TIEMPO_INTEGRACION = TIEMPO_INTEGRACION_INICIAL
 # Número de mediciones a promediar por cada adquisición
-NUM_MEDICIONES_PROMEDIO = 5
+NUM_MEDICIONES_PROMEDIO = 10
 # Tiempo de espera entre mediciones individuales (segundos)
 TIEMPO_ESPERA = 0.01 
 # ========== PARÁMETROS DE OPTIMIZACIÓN DEL TIEMPO DE INTEGRACIÓN ==========
@@ -49,8 +49,8 @@ ORDEN_FILTRO_BUTTER = 6         # Orden del filtro Butterworth
 
 # ========== RANGO DE LONGITUDES DE ONDA (TRUNCADO) ==========
 LAMBDA_MIN = 500  # Longitud de onda mínima en nm
-LAMBDA_MAX = 625  # Longitud de onda máxima en nm
-muestras_objetivo = 60  # Número de muestras deseadas después del diezmado
+LAMBDA_MAX = 600  # Longitud de onda máxima en nm
+muestras_objetivo = 100  # Número de muestras deseadas después del diezmado
 # ============================================================
 print(f"Configuración:")
 print(f"  - Tiempo de integración: {TIEMPO_INTEGRACION_INICIAL*1000} ms")
@@ -740,6 +740,11 @@ df_R0_diezmado.to_csv(os.path.join(ruta_series, 'R_0_data.csv'), index=False)
 df_R1_diezmado.to_csv(os.path.join(ruta_series, 'R_1_data.csv'), index=False)
 df_RM_diezmado.to_csv(os.path.join(ruta_series, 'R_M_data.csv'), index=False)
 df_MR_diezmado.to_csv(os.path.join(ruta_series, 'M_R_data.csv'), index=False)
+
+# Copia en directorio raíz (sin ID de sujeto)
+directorio_script = os.path.dirname(os.path.abspath(__file__))
+df_MR_diezmado.to_csv(os.path.join(directorio_script, 'M_R_data.csv'), index=False)
+print(f"Copia M_R guardada en directorio raíz: {os.path.join(directorio_script, 'M_R_data.csv')}")
 
 print(f"\nDatos guardados en: {ruta_sujeto}")
 print(f"  - TXT de sujeto: {ruta_datos_sujeto}")
