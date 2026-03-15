@@ -27,7 +27,7 @@ IAD_PER_LAMBDA_FOLDER_NAME = "por_lambda"
 # ajustado por Laura Sánchez (ec. 64 de su tesis).
 # Si quieres forzar un g fijo para comparación, cambia USAR_G_FIJO = True
 # y ajusta el valor en G_FIJO.
-USAR_G_FIJO = True
+USAR_G_FIJO = False
 G_FIJO      = 0.8   # solo se usa si USAR_G_FIJO = True
 
 # Modo rápido omite el "sanity check" que IAD hace con una simulación Montecarlo.
@@ -112,6 +112,10 @@ def mu_sp_laura_jacques_mm(lambda_nm: float) -> float:
 
     Como IAD trabaja en 1/mm, convertimos:
         46 cm^-1 = 4.6 mm^-1
+
+    Nota del cambio de parámetros:
+    En la tesis de Laura Sánchez, laura eligió un valor de a = 46 cm^-1, y b= 1.421, sin embargo, esos valores tomados de la revisión de jaques es para la piel, pero nosotros estamos usando un dedo, pulpa altamente vascularizada. Tenemos que buscar una nueva fuente.
+
     """
     A_CM = 46.0
     B_EXP = 1.421

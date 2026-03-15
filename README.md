@@ -4,6 +4,14 @@ Pipeline de adquisición espectral y reconstrucción de propiedades ópticas de 
 
 El sistema conecta un espectrofotómetro **Thorlabs CCS200** con el ejecutable `iad.exe` para obtener espectros de reflectancia. Posteriormente, se realiza un procesado utilizando el programa IAD de Scott Prahl, con el objetivo último de los coeficientes de absorción (`mu_a`) de muestras de piel humana in vivo, dados el coeficiente de scattering reducido (`mu_s'`) y factor de anisotropía (`g`). Estos scripts permiten hacer la recuperación en el espectro completo para una sola medición y para una serie de las mismas, así como realizar una reconstrucción temporal para observar cambios en los `mu_a` debido a fenómenos dinámicos. 
 
+La recuperación del coeficiente de absorción del tejido no es un tema trivial. Al contar solo con datos experimentales de medición de reflectancia, estamos forzados a elegir priors que reflejen las condiciones pertinentes para el problema inverso. La pulpa del dedo aún no ha sido documentada ni caracterizada de manera exhaustiva en la literatura, y muchos supuestos deben tomarse para obtener el `mu_a`. El script *batch_IAD.py* incluye una función empleada por Jaques, la cual permite obtener el coeficiente de esparcimiento reducido para el tejido a distintas longitudes de onda, sin embargo, esa aproximación no es válida para todos las regiones anatómicas. 
+
+Datos más recientes de Phan et al. (2021) permiten observar como el coeficiente de esparcimiento reducido varía grandemente según la localización en el cuerpo, por lo que era relevante obtener una nueva función mucho mejor adaptada a lo que percibimos en el dedo. En el suplemento de `Characterizing reduced scattering coefficient of normal human skin across different anatomic locations and Fitzpatrick skin types using spatial frequency domain imaging` se encuentra una tabla con puntos donde se obtuvo el `mu_s'`, depdendientes de la longitud de onda, la cual se usa en este repo para construir una función que ajusta una ley de potencia a estos puntos. Me refiero a esta función como `Phan-Sierra`. Cabe mencionar que está integrada en dos variantes, una es la forma de la expresión de potencia, y la otra es una curva de ajuste de spline a los puntos previamente mencionados. Se puede alternar con una línea en el código.
+
+Además, se presentan escenarios de comparación correspondientes a la varianza de los datos de Phan et al. (2021), permite observar distintas curvas según los valores de la sd. Después de correr el IAD, se producen varios archivos que permiten evaluar y comparar los resultados. Esta comparación solo está habilitada para el modo de adquisición simple.
+
+Es importante aclarar que estos datos se obtuvieron de la palma, referencia razonable para piel glabrosa.
+
 ---
 
 ## Estructura del repositorio
