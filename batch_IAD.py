@@ -33,7 +33,7 @@ G_FIJO      = 0.8   # solo se usa si USAR_G_FIJO = True
 # Modo rápido omite el "sanity check" que IAD hace con una simulación Montecarlo.
 USAR_MODO_RAPIDO = True
 # Mostrar o no el comando completo por cada lambda (Estético)
-MOSTRAR_COMANDOS = False
+MOSTRAR_COMANDOS = False 
 # ── TOGGLE PRINCIPAL, UN SOLO ESPECTRO O UNA TANDA CON MARCAS TEMPORALES ──────────────────────────────────────────────────────────
 MODO_TEMPORAL = False   # False → M_R_data.csv (un espectro)
                         # True  → M_R_tiempo_data.csv (serie temporal)
@@ -42,8 +42,8 @@ MODO_TEMPORAL = False   # False → M_R_data.csv (un espectro)
 CSV_TEMPORAL_NAME = "M_R_tiempo_data.csv"
 CSV_SALIDA_TEMPORAL = "IAD_run/resumen_iad_temporal.csv"
 INICIO_MEDICION = 22    # Descartar las primeras N mediciones (señal basura)
-MAX_MEDICIONES  = None    # None = todas; (CANTIDAD DE ESPECTROS A PROCESAR, después de INICIO)
-VENTANA_PROMEDIO = 5    # 1 = sin promediar; N > 1 = promediar N mediciones consecutivas
+MAX_MEDICIONES  = 10    # None = todas; (CANTIDAD DE ESPECTROS A PROCESAR, después de INICIO)
+VENTANA_PROMEDIO = 1    # 1 = sin promediar; N > 1 = promediar N mediciones consecutivas
 WORKERS        = os.cpu_count()-1 or 4   # detecta núcleos automáticamente
 
 

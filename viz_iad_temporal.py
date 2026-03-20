@@ -35,7 +35,7 @@ LAMBDA_VIS_MAX = 580   # ej. 600
 
 # Rango de espectros a visualizar por índice (1-based, None = sin límite)
 ESPECTRO_INICIO = None    # ej. 50  → empieza en el espectro 50
-ESPECTRO_FIN    = 30 # ej. 200 → termina en el espectro 200
+ESPECTRO_FIN    = None # ej. 200 → termina en el espectro 200
 
 # Número de espectros consecutivos a promediar para el waterfall 3D
 PROMEDIO_ESPECTROS = 1

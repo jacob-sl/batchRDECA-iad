@@ -51,6 +51,8 @@ NUM_ESPECTROS_TEMPORAL = 3000
 R_STD = 0.99
 # ========== PARÁMETROS DE OPTIMIZACIÓN DEL TIEMPO DE INTEGRACIÓN ==========
 # Para CCS200 en este flujo: el máximo es 1.0 (valores normalizados)
+# Para adquisición temporal: Porcentaje de saturación usar 0.3
+# Para adquisición singular: Porcentaje de saturación 0.99
 PORCENTAJE_SATURACION = 0.95
 VALOR_MAXIMO_DETECTOR = 1.0
 UMBRAL_SATURACION = VALOR_MAXIMO_DETECTOR * PORCENTAJE_SATURACION 
