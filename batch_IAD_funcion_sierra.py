@@ -42,7 +42,7 @@ USAR_MODO_RAPIDO = True
 MOSTRAR_COMANDOS = False
 
 # ── TOGGLE PRINCIPAL ──
-MODO = "temporal"   # "single"    → un espectro (M_R_data.csv)
+MODO = "single"   # "single"    → un espectro (M_R_data.csv)
                      # "temporal"  → serie temporal (M_R_tiempo_data.csv)
                      # "batch_all" → procesa TODOS los sujetos en Mediciones/
 
@@ -63,7 +63,7 @@ WORKERS = os.cpu_count() - 1 or 4
 # λ (nm): 471, 526, 591, 621, 659, 691, 731, 851
 
 # ── CONFIGURACIÓN: elegir ubicación anatómica de referencia ──
-PHAN_UBICACION = "Ventral Forearm"
+PHAN_UBICACION = "Cheek"
 # Opciones: "Forehead", "Cheek", "Ventral Forearm", "Palm", "Back",
 #           "Upper Arm", "Dorsal Forearm", "Neck", "Shin", "Chest"
 
@@ -689,13 +689,21 @@ def graficar_dashboard_mu_a(df_resultados: pd.DataFrame, ruta_png: Path):
             label=escenario,
         )
 
-    # Curva μa de referencia Phan para la ubicación seleccionada
-    nom = df_plot[df_plot["escenario"] == "nominal"].sort_values("lambda_nm")
-    if not nom.empty:
-        lam_ref = nom["lambda_nm"].to_numpy(dtype=float)
-        mu_a_ref = np.asarray(phan_mu_a_mm(lam_ref), dtype=float)
-        ax.plot(lam_ref, mu_a_ref, linewidth=2.2, linestyle="-.",
-                color="black", label=f"μa Phan ({PHAN_UBICACION})")
+    # Referencia μa de Phan: solo puntos medidos dentro del rango procesado.
+    lambda_min = float(df_plot["lambda_nm"].min())
+    lambda_max = float(df_plot["lambda_nm"].max())
+    mascara_ref = (PHAN_LAMBDA_NM >= lambda_min) & (PHAN_LAMBDA_NM <= lambda_max)
+    if np.any(mascara_ref):
+        ax.plot(
+            PHAN_LAMBDA_NM[mascara_ref],
+            PHAN_MUA_MM[mascara_ref],
+            linestyle="None",
+            marker="o",
+            markersize=7.0,
+            markeredgewidth=1.2,
+            color="black",
+            label=f"μa Phan ({PHAN_UBICACION})",
+        )
 
     ax.set_xlabel("Longitud de onda (nm)")
     ax.set_ylabel("μa recuperado (1/mm)")
