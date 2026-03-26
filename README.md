@@ -417,4 +417,4 @@ En ejecuciones posteriores, si la calibracion es compatible (mismas longitudes d
 - **Prahl, S. A.** — Inverse Adding-Doubling. Software y documentacion: [omlc.org/software/iad](https://omlc.org/software/iad/).
 - **Phan, T. T. et al. (2021)** — *Characterizing reduced scattering coefficient of normal human skin across different anatomic locations and Fitzpatrick skin types using spatial frequency domain imaging.* Journal of Biomedical Optics, 26(2), 026001.
 - **Jacques, S. L. (2013)** — *Optical properties of biological tissues: a review.* Physics in Medicine & Biology, 58(11), R37.
-- **Ma, X. et al. (2005)** — Polinomio de 6to orden para el factor de anisotropia g(lambda) de piel humana.
+- **Ma, X. et al. (2005)** — Polinomio de 6to orden para el factor de anisotropia g(lambda) de piel porcina.
