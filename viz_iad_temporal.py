@@ -2,8 +2,8 @@
 Visualización 3D waterfall y animación temporal de parámetros
 recuperados por IAD (mu_a, mu_s', g) a partir de la serie temporal.
 
-Uso: generar primero resumen_iad_temporal.csv con scriptIADLauraClaude.py
-     (MODO_TEMPORAL = True), luego ejecutar este script.
+Uso: ejecutar batch_IAD_funcion_sierra.py en modo temporal primero,
+     luego ejecutar este script y seleccionar el sujeto.
 """
 
 from pathlib import Path
@@ -19,8 +19,8 @@ import matplotlib.animation as animation
 # CONFIGURACIÓN
 # ============================================================
 
-# Archivo CSV de salida del modo temporal del IAD
-CSV_NAME = "IAD_run/resumen_iad_temporal.csv"
+MEDICIONES_DIR = Path(__file__).parent / "Mediciones"
+CSV_RESULT_NAME = "resumen_iad_temporal_phan_sierra.csv"
 
 # Parámetro a graficar — columnas disponibles:
 #   "mu_a_mm-1"        Coeficiente de absorción (mm⁻¹)
@@ -42,17 +42,63 @@ PROMEDIO_ESPECTROS = 1
 
 
 # ============================================================
+# SELECTOR DE SUJETO TEMPORAL
+# ============================================================
+
+def seleccionar_sujeto_temporal() -> Path:
+    """Muestra menú interactivo para elegir un sujeto temporal con resultados IAD."""
+    carpetas = sorted([
+        d for d in MEDICIONES_DIR.iterdir()
+        if d.is_dir() and d.name.startswith("sujeto_") and d.name.endswith("_temporal")
+    ]) if MEDICIONES_DIR.exists() else []
+
+    carpetas_validas = [
+        c for c in carpetas
+        if (c / "series" / "IAD_results" / CSV_RESULT_NAME).exists()
+    ]
+
+    if not carpetas_validas:
+        # Fallback: buscar en la ruta legacy
+        legacy = Path(__file__).parent / "IAD_run" / CSV_RESULT_NAME
+        if legacy.exists():
+            print(f"[Fallback] Usando {legacy}")
+            return legacy
+        raise FileNotFoundError(
+            f"No se encontraron sujetos temporales con {CSV_RESULT_NAME} en {MEDICIONES_DIR}.\n"
+            "Ejecuta batch_IAD_funcion_sierra.py en modo temporal primero."
+        )
+
+    print(f"\n{'='*50}")
+    print(f"  Sujetos temporales con resultados IAD")
+    print(f"{'='*50}")
+    for i, c in enumerate(carpetas_validas, 1):
+        print(f"  {i:3d}) {c.name}")
+    print(f"{'='*50}")
+    print(f"  Enter = último ({carpetas_validas[-1].name})")
+
+    seleccion = input("  Selección: ").strip()
+    if seleccion == "":
+        elegida = carpetas_validas[-1]
+    else:
+        try:
+            idx = int(seleccion) - 1
+            if 0 <= idx < len(carpetas_validas):
+                elegida = carpetas_validas[idx]
+            else:
+                raise ValueError
+        except ValueError:
+            raise ValueError(f"Selección inválida: '{seleccion}'.")
+
+    csv_path = elegida / "series" / "IAD_results" / CSV_RESULT_NAME
+    print(f"[Sujeto] {elegida.name} → {csv_path}")
+    return csv_path
+
+
+# ============================================================
 # CARGA DE DATOS
 # ============================================================
 
-csv_path = Path(__file__).parent / CSV_NAME
-
-if not csv_path.exists():
-    raise FileNotFoundError(
-        f"No se encontró '{CSV_NAME}' en {csv_path.parent}.\n"
-        "Ejecuta scriptIADLauraClaude.py con MODO_TEMPORAL = True primero."
-    )
-
+csv_path = seleccionar_sujeto_temporal()
 df = pd.read_csv(csv_path)
 
 # Pivotar: filas = mediciones (tiempo), columnas = lambda

@@ -30,18 +30,18 @@ atexit.register(_cleanup_spec)
 
 # ========== PARÁMETROS AJUSTABLES ==========
 # Tiempo de integración en segundos (ej: 0.02 = 20ms, 0.1 = 100ms)
-TIEMPO_INTEGRACION_INICIAL = 0.15
+TIEMPO_INTEGRACION_INICIAL = 0.10
 TIEMPO_INTEGRACION = TIEMPO_INTEGRACION_INICIAL
 # Número de mediciones a promediar por cada adquisición
-NUM_MEDICIONES_PROMEDIO = 10
+NUM_MEDICIONES_PROMEDIO = 15
 # Tiempo de espera entre mediciones individuales (segundos)
 TIEMPO_ESPERA = 0.01 
 # ========== PARÁMETROS DE OPTIMIZACIÓN DEL TIEMPO DE INTEGRACIÓN ==========
 # Umbral absoluto de saturación
 # Para CCS200: el máximo es 1.0 (valores normalizados)
-PORCENTAJE_SATURACION = 0.98  # 98% del máximo
+PORCENTAJE_SATURACION = 0.99  # 99% del máximo
 VALOR_MAXIMO_DETECTOR = 1.0  # Valor máximo del detector (normalizado)
-UMBRAL_SATURACION = VALOR_MAXIMO_DETECTOR * PORCENTAJE_SATURACION  # = 0.98
+UMBRAL_SATURACION = VALOR_MAXIMO_DETECTOR * PORCENTAJE_SATURACION  # = 0.99
 
 # ========== CONFIGURACIÓN DEL FILTRO BUTTERWORTH ==========
 FRECUENCIA_CORTE_BUTTER = 0.1  # Frecuencia de corte normalizada (0-1, Nyquist=1)

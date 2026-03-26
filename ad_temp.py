@@ -46,14 +46,14 @@ NUM_MEDICIONES_PROMEDIO = 10
 # Tiempo de espera entre mediciones individuales para R_0 y R_1 (segundos)
 TIEMPO_ESPERA = 0.01
 # Número de espectros temporales a adquirir para R_M
-NUM_ESPECTROS_TEMPORAL = 3000
+NUM_ESPECTROS_TEMPORAL = 1000
 # Reflectancia del estándar
 R_STD = 0.99
 # ========== PARÁMETROS DE OPTIMIZACIÓN DEL TIEMPO DE INTEGRACIÓN ==========
 # Para CCS200 en este flujo: el máximo es 1.0 (valores normalizados)
 # Para adquisición temporal: Porcentaje de saturación usar 0.3
 # Para adquisición singular: Porcentaje de saturación 0.99
-PORCENTAJE_SATURACION = 0.95
+PORCENTAJE_SATURACION = 0.5
 VALOR_MAXIMO_DETECTOR = 1.0
 UMBRAL_SATURACION = VALOR_MAXIMO_DETECTOR * PORCENTAJE_SATURACION 
 
@@ -66,7 +66,7 @@ LAMBDA_MIN = 500  # Longitud de onda mínima en nm
 LAMBDA_MAX = 600  # Longitud de onda máxima en nm
 
 # Número de muestras deseadas después del diezmado
-MUESTRAS_OBJETIVO = 100
+MUESTRAS_OBJETIVO = 80
 
 # ============================================================
 

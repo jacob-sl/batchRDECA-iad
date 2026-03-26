@@ -14,8 +14,10 @@ import matplotlib.pyplot as plt
 # CONFIGURACIÓN
 # ============================================================
 
-# Ruta al CSV con tus datos M_R
-MR_CSV_PATH = Path(__file__).parent / "M_R_data.csv"
+# Carpeta de mediciones
+MEDICIONES_DIR = Path(__file__).parent / "Mediciones"
+# Selección automática del último sujeto (True) o selector interactivo (False)
+AUTO_ULTIMO_SUJETO = False
 # Ruta al archivo plantilla .rxt
 RXT_TEMPLATE_PATH = Path(__file__).parent / "sample-F.rxt"
 # Ruta al ejecutable de IAD
@@ -39,38 +41,76 @@ USAR_MODO_RAPIDO = True
 # Mostrar o no el comando completo por cada lambda
 MOSTRAR_COMANDOS = False
 
-# ── TOGGLE PRINCIPAL, UN SOLO ESPECTRO O UNA TANDA CON MARCAS TEMPORALES ──
-MODO_TEMPORAL = False   # False → M_R_data.csv (un espectro)
-                        # True  → M_R_tiempo_data.csv (serie temporal)
+# ── TOGGLE PRINCIPAL ──
+MODO = "temporal"   # "single"    → un espectro (M_R_data.csv)
+                     # "temporal"  → serie temporal (M_R_tiempo_data.csv)
+                     # "batch_all" → procesa TODOS los sujetos en Mediciones/
 
-# Solo se usa cuando MODO_TEMPORAL = True
+# Nombres de archivos CSV dentro de series/
+CSV_SINGLE_NAME = "M_R_data.csv"
 CSV_TEMPORAL_NAME = "M_R_tiempo_data.csv"
-CSV_SALIDA_TEMPORAL = "IAD_run/resumen_iad_temporal_phan_sierra.csv"
 INICIO_MEDICION = 22
 MAX_MEDICIONES = None
-VENTANA_PROMEDIO = 5
+VENTANA_PROMEDIO = 50
 WORKERS = os.cpu_count() - 1 or 4
 
 
 # ============================================================
 # FUNCIÓN PHAN-SIERRA para μs'(λ)
 # ============================================================
-# Este script descarta la versión heurística previa. La versión válida
-# usa solo datos Palm reportados en el suplemento de Phan et al.
-#
-# Datos medidos en literatura:
-#   λ (nm):        471, 526, 591, 621, 659, 691, 731, 851
-#   μs' (mm^-1):   2.57, 2.18, 1.78, 1.72, 1.60, 1.54, 1.51, 1.45
-#   sd(μs')       0.421,0.278,0.147,0.126,0.108,0.0984,0.0883,0.0813
-#   μa (mm^-1):   0.317,0.215,0.092,0.0288,0.0204,0.0147,0.0111,0.00978
-#
-# Referencia anatómica:
-# Palm = glabrous skin, aproximación razonable para tejido palmar/digital.
+# Datos de μs' y μa medidos por SFDI en 10 ubicaciones anatómicas.
+# Fuente: Phan et al., JBO 26(2) 026001, Supplementary Tables 2 & 3.
+# λ (nm): 471, 526, 591, 621, 659, 691, 731, 851
 
-PHAN_LAMBDA_NM = np.array([471.0, 526.0, 591.0, 621.0, 659.0, 691.0, 731.0, 851.0], dtype=float)
-PHAN_MUSP_MM = np.array([2.57, 2.18, 1.78, 1.72, 1.60, 1.54, 1.51, 1.45], dtype=float)
-PHAN_MUSP_SD_MM = np.array([0.421, 0.278, 0.147, 0.126, 0.108, 0.0984, 0.0883, 0.0813], dtype=float)
-PHAN_MUA_MM = np.array([0.317, 0.215, 0.092, 0.0288, 0.0204, 0.0147, 0.0111, 0.00978], dtype=float)
+# ── CONFIGURACIÓN: elegir ubicación anatómica de referencia ──
+PHAN_UBICACION = "Ventral Forearm"
+# Opciones: "Forehead", "Cheek", "Ventral Forearm", "Palm", "Back",
+#           "Upper Arm", "Dorsal Forearm", "Neck", "Shin", "Chest"
+
+PHAN_DATOS = {
+    "Forehead":        {"musp": [2.12, 1.75, 1.56, 1.53, 1.46, 1.46, 1.51, 1.65],
+                        "musp_sd": [1.47, 0.812, 0.518, 0.42, 0.346, 0.29, 0.242, 0.174],
+                        "mua": [0.848, 0.533, 0.238, 0.128, 0.097, 0.0707, 0.0513, 0.0282]},
+    "Cheek":           {"musp": [1.82, 1.63, 1.46, 1.43, 1.36, 1.37, 1.42, 1.53],
+                        "musp_sd": [0.987, 0.711, 0.491, 0.405, 0.34, 0.286, 0.241, 0.173],
+                        "mua": [0.688, 0.47, 0.211, 0.116, 0.0871, 0.0637, 0.0459, 0.022]},
+    "Ventral Forearm": {"musp": [2.25, 1.93, 1.63, 1.54, 1.45, 1.41, 1.42, 1.46],
+                        "musp_sd": [1.0, 0.71, 0.415, 0.333, 0.269, 0.216, 0.169, 0.115],
+                        "mua": [0.644, 0.424, 0.201, 0.111, 0.0841, 0.0619, 0.0451, 0.0255]},
+    "Palm":            {"musp": [2.57, 2.18, 1.78, 1.72, 1.60, 1.54, 1.51, 1.45],
+                        "musp_sd": [0.421, 0.278, 0.147, 0.126, 0.108, 0.0984, 0.0883, 0.0813],
+                        "mua": [0.317, 0.215, 0.092, 0.0288, 0.0204, 0.0147, 0.0111, 0.00978]},
+    "Back":            {"musp": [1.64, 1.47, 1.36, 1.35, 1.30, 1.30, 1.34, 1.42],
+                        "musp_sd": [0.99, 0.736, 0.499, 0.425, 0.363, 0.306, 0.246, 0.154],
+                        "mua": [0.674, 0.469, 0.242, 0.149, 0.113, 0.0828, 0.0587, 0.0236]},
+    "Upper Arm":       {"musp": [2.23, 1.90, 1.58, 1.48, 1.39, 1.36, 1.37, 1.41],
+                        "musp_sd": [1.05, 0.739, 0.418, 0.326, 0.263, 0.209, 0.167, 0.12],
+                        "mua": [0.578, 0.378, 0.173, 0.0957, 0.0717, 0.0531, 0.0388, 0.0213]},
+    "Dorsal Forearm":  {"musp": [1.70, 1.51, 1.37, 1.34, 1.29, 1.28, 1.31, 1.38],
+                        "musp_sd": [0.989, 0.726, 0.456, 0.366, 0.298, 0.239, 0.188, 0.12],
+                        "mua": [0.752, 0.504, 0.249, 0.15, 0.116, 0.0855, 0.0614, 0.0305]},
+    "Neck":            {"musp": [1.74, 1.60, 1.42, 1.38, 1.30, 1.27, 1.29, 1.31],
+                        "musp_sd": [0.876, 0.693, 0.447, 0.374, 0.314, 0.246, 0.196, 0.117],
+                        "mua": [0.549, 0.363, 0.18, 0.111, 0.0807, 0.0581, 0.0401, 0.0162]},
+    "Shin":            {"musp": [1.85, 1.59, 1.40, 1.34, 1.27, 1.24, 1.25, 1.30],
+                        "musp_sd": [0.945, 0.683, 0.419, 0.33, 0.273, 0.222, 0.179, 0.141],
+                        "mua": [0.591, 0.391, 0.204, 0.123, 0.0942, 0.0699, 0.0511, 0.0275]},
+    "Chest":           {"musp": [1.96, 1.71, 1.45, 1.38, 1.29, 1.25, 1.25, 1.28],
+                        "musp_sd": [1.06, 0.773, 0.44, 0.344, 0.28, 0.232, 0.188, 0.141],
+                        "mua": [0.472, 0.322, 0.158, 0.0883, 0.0649, 0.047, 0.033, 0.0163]},
+}
+
+if PHAN_UBICACION not in PHAN_DATOS:
+    raise ValueError(
+        f"PHAN_UBICACION='{PHAN_UBICACION}' no válida. "
+        f"Opciones: {list(PHAN_DATOS)}"
+    )
+
+_ub = PHAN_DATOS[PHAN_UBICACION]
+PHAN_LAMBDA_NM  = np.array([471.0, 526.0, 591.0, 621.0, 659.0, 691.0, 731.0, 851.0], dtype=float)
+PHAN_MUSP_MM    = np.array(_ub["musp"],    dtype=float)
+PHAN_MUSP_SD_MM = np.array(_ub["musp_sd"], dtype=float)
+PHAN_MUA_MM     = np.array(_ub["mua"],     dtype=float)
 
 # Selector de modelo para μs'(λ)
 PHAN_SIERRA_MODE = "pchip"   # opciones: "powerlaw" o "pchip"
@@ -621,118 +661,66 @@ def graficar_phan_sierra(ruta_png: Path, mostrar: bool = False):
 
 
 
-def graficar_mu_sp_escenarios(df_mr: pd.DataFrame, ruta_png: Path):
-    """Grafica μs' nominal y banda ±1σ de Phan sobre las lambdas medidas."""
-    lambdas = np.sort(df_mr["wavelength_nm"].astype(float).unique())
-    mu_nom = np.asarray(phan_sierra_mu_sp_mm(lambdas), dtype=float)
-    mu_sd = np.asarray(phan_musp_sd_mm(lambdas), dtype=float)
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(lambdas, mu_nom, linewidth=2.0, label=f"Nominal ({PHAN_SIERRA_MODE})")
-    plt.plot(lambdas, np.maximum(mu_nom - mu_sd, 1e-9), linewidth=1.6, linestyle="--", label="Nominal - 1sd Phan")
-    plt.plot(lambdas, mu_nom + mu_sd, linewidth=1.6, linestyle="--", label="Nominal + 1sd Phan")
-    plt.fill_between(
-        lambdas,
-        np.maximum(mu_nom - mu_sd, 1e-9),
-        mu_nom + mu_sd,
-        alpha=0.15,
-        label="Banda ±1sd de Phan",
-    )
-
-    plt.xlabel("Longitud de onda (nm)")
-    plt.ylabel("μs' de entrada (1/mm)")
-    plt.title("Sensibilidad de μs'(λ) basada en Phan")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(ruta_png, dpi=300, bbox_inches="tight")
-    plt.close()
-
-
-
-def graficar_mu_a_sensibilidad(df_resultados: pd.DataFrame, ruta_png: Path):
-    """Grafica μa recuperado para los escenarios nominal y ±1σ."""
+def graficar_dashboard_mu_a(df_resultados: pd.DataFrame, ruta_png: Path):
+    """
+    Gráfica de sensibilidad de μa recuperado a cambios en μs'(λ).
+    Muestra los 3 escenarios (nominal, ±1σ) superpuestos.
+    """
     df_plot = df_resultados.dropna(subset=["lambda_nm", "mu_a_mm-1", "escenario"]).copy()
     if df_plot.empty:
         return
 
-    plt.figure(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    estilos = {
+        "nominal": {"lw": 2.0, "ls": "-", "marker": "o", "ms": 3.5},
+        "menos_1sd": {"lw": 1.4, "ls": "--", "marker": None, "ms": 0},
+        "mas_1sd": {"lw": 1.4, "ls": "--", "marker": None, "ms": 0},
+    }
     for escenario in ["menos_1sd", "nominal", "mas_1sd"]:
         sub = df_plot[df_plot["escenario"] == escenario].sort_values("lambda_nm")
-        if not sub.empty:
-            plt.plot(sub["lambda_nm"], sub["mu_a_mm-1"], marker="o", markersize=3.5, linewidth=1.5, label=escenario)
+        if sub.empty:
+            continue
+        est = estilos.get(escenario, estilos["nominal"])
+        ax.plot(
+            sub["lambda_nm"], sub["mu_a_mm-1"],
+            marker=est["marker"], markersize=est["ms"],
+            linewidth=est["lw"], linestyle=est["ls"],
+            label=escenario,
+        )
 
-    plt.xlabel("Longitud de onda (nm)")
-    plt.ylabel("μa recuperado (1/mm)")
-    plt.title("Sensibilidad de μa a cambios en μs'(λ)")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
+    # Curva μa de referencia Phan para la ubicación seleccionada
+    nom = df_plot[df_plot["escenario"] == "nominal"].sort_values("lambda_nm")
+    if not nom.empty:
+        lam_ref = nom["lambda_nm"].to_numpy(dtype=float)
+        mu_a_ref = np.asarray(phan_mu_a_mm(lam_ref), dtype=float)
+        ax.plot(lam_ref, mu_a_ref, linewidth=2.2, linestyle="-.",
+                color="black", label=f"μa Phan ({PHAN_UBICACION})")
+
+    ax.set_xlabel("Longitud de onda (nm)")
+    ax.set_ylabel("μa recuperado (1/mm)")
+    ax.set_title(f"Sensibilidad de μa — ref: {PHAN_UBICACION} (Phan et al.)")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
     plt.tight_layout()
-    plt.savefig(ruta_png, dpi=300, bbox_inches="tight")
+    plt.savefig(ruta_png, dpi=200, bbox_inches="tight")
     plt.close()
 
 
 
-def graficar_comparacion_mu_a(df_comp: pd.DataFrame, ruta_png: Path, escenario: str):
-    """Grafica μa_IAD contra μa_Phan interpolado a las mismas lambdas."""
-    df_plot = df_comp.sort_values("lambda_nm")
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(df_plot["lambda_nm"], df_plot["mu_a_iad_mm-1"], marker="o", markersize=3.5, linewidth=1.7, label="μa IAD")
-    plt.plot(df_plot["lambda_nm"], df_plot["mu_a_phan_mm-1"], linewidth=2.1, label="μa Palm de Phan interpolado")
-    plt.xlabel("Longitud de onda (nm)")
-    plt.ylabel("μa (1/mm)")
-    plt.title(f"μa_IAD vs μa_Phan ({escenario})")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(ruta_png, dpi=300, bbox_inches="tight")
-    plt.close()
-
-
-
-def graficar_comparacion_mu_a_normalizada(df_comp: pd.DataFrame, ruta_png: Path, escenario: str):
-    """Grafica comparación normalizada de μa para separar forma y escala."""
-    df_plot = df_comp.sort_values("lambda_nm")
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(df_plot["lambda_nm"], df_plot["mu_a_iad_norm"], marker="o", markersize=3.5, linewidth=1.7, label="μa IAD normalizado")
-    plt.plot(df_plot["lambda_nm"], df_plot["mu_a_phan_norm"], linewidth=2.1, label="μa Phan normalizado")
-    plt.xlabel("Longitud de onda (nm)")
-    plt.ylabel(f"μa / μa({PHAN_MUA_NORM_LAMBDA_REF_NM:.0f} nm)")
-    plt.title(f"Comparación normalizada de μa ({escenario})")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(ruta_png, dpi=300, bbox_inches="tight")
-    plt.close()
-
-
-
-def generar_comparaciones_mu_a_desde_csv(csv_path: Path, iad_dir: Path) -> Path | None:
-    """Lee el resumen de salida y genera comparación μa_IAD vs μa_Phan."""
-    df_resumen = leer_resumen_iad_desde_csv(csv_path)
+def generar_metricas_mu_a(df_resultados: pd.DataFrame, output_dir: Path) -> Path | None:
+    """Computa métricas de error μa_IAD vs μa_Phan por escenario. Solo CSV, sin gráficas."""
+    df_resumen = df_resultados.dropna(subset=["lambda_nm", "mu_a_mm-1"]).copy()
     if df_resumen.empty:
-        print(f"[Comparacion μa] Sin filas válidas en {csv_path}")
         return None
 
-    if "medicion" in df_resumen.columns:
-        print("[Comparacion μa] CSV temporal detectado: la comparación automática se omite en este script.")
-        return None
+    if "escenario" not in df_resumen.columns:
+        df_resumen["escenario"] = "nominal"
 
     metricas = []
     for escenario, sub in df_resumen.groupby("escenario", sort=True):
         df_comp = construir_comparacion_mu_a(sub)
-        nombre_seguro = str(escenario).replace(" ", "_")
-        ruta_comp = iad_dir / f"comparacion_mu_a_phan_{nombre_seguro}.csv"
-        df_comp.to_csv(ruta_comp, index=False)
-        graficar_comparacion_mu_a(df_comp, iad_dir / f"grafica_mu_a_iad_vs_phan_{nombre_seguro}.png", str(escenario))
-        graficar_comparacion_mu_a_normalizada(
-            df_comp,
-            iad_dir / f"grafica_mu_a_normalizada_{nombre_seguro}.png",
-            str(escenario),
-        )
-
         fila_metricas = calcular_metricas_mu_a(df_comp)
         fila_metricas["escenario"] = escenario
         metricas.append(fila_metricas)
@@ -740,7 +728,7 @@ def generar_comparaciones_mu_a_desde_csv(csv_path: Path, iad_dir: Path) -> Path 
     if not metricas:
         return None
 
-    ruta_metricas = iad_dir / "metricas_mu_a_phan_por_escenario.csv"
+    ruta_metricas = output_dir / "metricas_mu_a_phan_por_escenario.csv"
     pd.DataFrame(metricas).sort_values("escenario").to_csv(ruta_metricas, index=False)
     return ruta_metricas
 
@@ -816,6 +804,261 @@ def _correr_iad_una_lambda(
 
 
 
+def seleccionar_sujeto(temporal: bool) -> Path:
+    """
+    Busca carpetas de sujeto en MEDICIONES_DIR y devuelve la ruta al CSV
+    correspondiente (single o temporal).
+
+    Si AUTO_ULTIMO_SUJETO es True, selecciona el último automáticamente.
+    Si no, muestra un menú interactivo.
+    """
+    if not MEDICIONES_DIR.exists():
+        raise FileNotFoundError(f"No existe la carpeta de mediciones: {MEDICIONES_DIR}")
+
+    carpetas = sorted([
+        d for d in MEDICIONES_DIR.iterdir()
+        if d.is_dir() and d.name.startswith("sujeto_")
+    ])
+
+    # Filtrar: para temporal, solo carpetas que terminen en _temporal
+    # Para single, solo carpetas que NO terminen en _temporal
+    if temporal:
+        carpetas = [d for d in carpetas if d.name.endswith("_temporal")]
+    else:
+        carpetas = [d for d in carpetas if not d.name.endswith("_temporal")]
+
+    if not carpetas:
+        tipo = "temporales" if temporal else "single"
+        raise FileNotFoundError(
+            f"No se encontraron carpetas de sujeto ({tipo}) en {MEDICIONES_DIR}"
+        )
+
+    csv_name = CSV_TEMPORAL_NAME if temporal else CSV_SINGLE_NAME
+
+    # Verificar cuáles tienen el CSV esperado
+    carpetas_validas = []
+    for c in carpetas:
+        csv_path = c / "series" / csv_name
+        if csv_path.exists():
+            carpetas_validas.append(c)
+
+    if not carpetas_validas:
+        raise FileNotFoundError(
+            f"Ninguna carpeta de sujeto contiene series/{csv_name}"
+        )
+
+    if AUTO_ULTIMO_SUJETO:
+        elegida = carpetas_validas[-1]
+        print(f"[Auto] Usando último sujeto: {elegida.name}")
+    else:
+        print(f"\n{'='*50}")
+        print(f"  Sujetos disponibles ({'temporal' if temporal else 'single'})")
+        print(f"{'='*50}")
+        for i, c in enumerate(carpetas_validas, 1):
+            print(f"  {i:3d}) {c.name}")
+        print(f"{'='*50}")
+        print(f"  Enter = último ({carpetas_validas[-1].name})")
+
+        seleccion = input("  Teclea el número del elemento de la lista: ").strip()
+        if seleccion == "":
+            elegida = carpetas_validas[-1]
+        else:
+            try:
+                idx = int(seleccion) - 1
+                if 0 <= idx < len(carpetas_validas):
+                    elegida = carpetas_validas[idx]
+                else:
+                    raise ValueError
+            except ValueError:
+                raise ValueError(
+                    f"Selección inválida: '{seleccion}'. "
+                    f"Usa un número entre 1 y {len(carpetas_validas)}."
+                )
+
+    csv_path = elegida / "series" / csv_name
+    print(f"[Sujeto] {elegida.name} → {csv_path}")
+    return csv_path
+
+
+
+def listar_todos_sujetos() -> list[tuple[Path, bool]]:
+    """
+    Escanea MEDICIONES_DIR y retorna lista de (carpeta, es_temporal)
+    para todas las carpetas de sujeto que tengan el CSV esperado.
+    """
+    if not MEDICIONES_DIR.exists():
+        raise FileNotFoundError(f"No existe la carpeta de mediciones: {MEDICIONES_DIR}")
+
+    resultados = []
+    for d in sorted(MEDICIONES_DIR.iterdir()):
+        if not d.is_dir() or not d.name.startswith("sujeto_"):
+            continue
+
+        es_temporal = d.name.endswith("_temporal")
+        csv_name = CSV_TEMPORAL_NAME if es_temporal else CSV_SINGLE_NAME
+        csv_path = d / "series" / csv_name
+
+        if csv_path.exists():
+            resultados.append((d, es_temporal))
+
+    if not resultados:
+        raise FileNotFoundError(
+            f"No se encontraron carpetas de sujeto con CSVs válidos en {MEDICIONES_DIR}"
+        )
+
+    return resultados
+
+
+
+def procesar_sujeto_single(
+    csv_path: Path,
+    output_dir: Path,
+    header_lines: list[str],
+    per_lambda_dir: Path,
+) -> None:
+    """Procesa un sujeto single: IAD por escenarios → CSV + métricas + dashboard."""
+    limpiar_carpeta_por_lambda(per_lambda_dir)
+
+    df_mr = leer_csv_mr(csv_path)
+
+    resultados = []
+    total = len(df_mr) * len(ESCENARIOS_MUSP)
+    t_inicio = time.time()
+    contador = 0
+
+    for escenario in ESCENARIOS_MUSP:
+        for _, row in df_mr.iterrows():
+            wavelength = float(row["wavelength_nm"])
+            reflectance = float(row["reflectance"])
+
+            fila = _correr_iad_una_lambda(
+                wavelength,
+                reflectance,
+                header_lines,
+                per_lambda_dir,
+                IAD_EXE_PATH,
+                escenario=escenario,
+                factor_musp=1.0,
+            )
+            resultados.append(fila)
+            contador += 1
+            _progreso(contador, total, t_inicio)
+
+    df_resultados = pd.DataFrame(resultados).sort_values(["escenario", "lambda_nm"])
+    ruta_resumen = output_dir / "resumen_resultados_phan_sierra.csv"
+    df_resultados.to_csv(ruta_resumen, index=False)
+
+    ruta_metricas = generar_metricas_mu_a(df_resultados, output_dir)
+    graficar_dashboard_mu_a(df_resultados, output_dir / "dashboard_mu_a.png")
+
+    print(f"\n  Resumen: {ruta_resumen}")
+    if ruta_metricas is not None:
+        print(f"  Métricas: {ruta_metricas}")
+    print(f"  Dashboard: {output_dir / 'dashboard_mu_a.png'}")
+
+
+
+def procesar_sujeto_temporal(
+    csv_path: Path,
+    output_dir: Path,
+    header_lines: list[str],
+    per_lambda_dir: Path,
+) -> None:
+    """Procesa un sujeto temporal: IAD paralelo → CSV de resumen."""
+    limpiar_carpeta_por_lambda(per_lambda_dir)
+
+    mediciones = leer_csv_mr_temporal(csv_path)
+
+    ids_medicion = sorted(mediciones.keys())
+    ids_medicion = [m for m in ids_medicion if m >= INICIO_MEDICION]
+    if MAX_MEDICIONES is not None:
+        ids_medicion = ids_medicion[:MAX_MEDICIONES]
+
+    if VENTANA_PROMEDIO > 1:
+        grupos = [ids_medicion[i:i + VENTANA_PROMEDIO] for i in range(0, len(ids_medicion), VENTANA_PROMEDIO)]
+        mediciones_prom = {}
+        for grupo in grupos:
+            rep_id = grupo[0]
+            tiempo_prom = sum(mediciones[m]["tiempo"] for m in grupo) / len(grupo)
+            wls = [wl for wl, _ in mediciones[grupo[0]]["espectro"]]
+            n = len(grupo)
+            refs_prom = [sum(mediciones[m]["espectro"][j][1] for m in grupo) / n for j in range(len(wls))]
+            mediciones_prom[rep_id] = {
+                "tiempo": tiempo_prom,
+                "espectro": list(zip(wls, refs_prom)),
+            }
+        ids_medicion = [g[0] for g in grupos]
+        mediciones = mediciones_prom
+
+    total_med = len(ids_medicion)
+
+    tareas = [
+        (escenario, med_id, mediciones[med_id]["tiempo"], float(wl), float(ref))
+        for escenario in ("nominal",)
+        for med_id in ids_medicion
+        for wl, ref in mediciones[med_id]["espectro"]
+    ]
+    total_tareas = len(tareas)
+
+    print(
+        f"  Mediciones: {total_med}  |  "
+        f"Tareas IAD: {total_tareas}  |  Workers: {WORKERS}"
+    )
+
+    def _tarea(escenario, med_id, tiempo, wl, ref):
+        fila = _correr_iad_una_lambda(
+            wl,
+            ref,
+            header_lines,
+            per_lambda_dir,
+            IAD_EXE_PATH,
+            escenario=escenario,
+            factor_musp=1.0,
+            med_id=med_id,
+        )
+        fila["medicion"] = med_id
+        fila["tiempo"] = tiempo
+        return fila
+
+    resultados = []
+    t_inicio = time.time()
+
+    if WORKERS <= 1:
+        for i, tarea in enumerate(tareas, 1):
+            resultados.append(_tarea(*tarea))
+            _progreso(i, total_tareas, t_inicio)
+    else:
+        with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+            futuros = {executor.submit(_tarea, *t): t for t in tareas}
+            completadas = 0
+            for fut in as_completed(futuros):
+                resultados.append(fut.result())
+                completadas += 1
+                _progreso(completadas, total_tareas, t_inicio)
+
+    df_resultados = pd.DataFrame(resultados)
+    cols_primeras = [
+        "escenario",
+        "factor_musp",
+        "medicion",
+        "tiempo",
+        "lambda_nm",
+        "reflectance_input",
+        "mu_a_mm-1",
+        "mu_s_prime_mm-1",
+        "g",
+    ]
+    cols_resto = [c for c in df_resultados.columns if c not in cols_primeras]
+    df_resultados = df_resultados[cols_primeras + cols_resto]
+    df_resultados = df_resultados.sort_values(["escenario", "medicion", "lambda_nm"])
+
+    ruta_resumen = output_dir / "resumen_iad_temporal_phan_sierra.csv"
+    df_resultados.to_csv(ruta_resumen, index=False)
+
+    print(f"\n  Resumen temporal: {ruta_resumen}")
+
+
+
 def main():
     # ------------------------------------------------------------
     # 1. Validar rutas comunes
@@ -826,7 +1069,7 @@ def main():
         raise FileNotFoundError(f"No existe iad.exe: {IAD_EXE_PATH}")
 
     # ------------------------------------------------------------
-    # 2. Crear carpetas de trabajo
+    # 2. Crear carpetas de trabajo (scratch space)
     # ------------------------------------------------------------
     base_dir = Path(__file__).parent
     iad_dir = base_dir / IAD_FOLDER_NAME
@@ -835,16 +1078,15 @@ def main():
     per_lambda_dir = iad_dir / IAD_PER_LAMBDA_FOLDER_NAME
     per_lambda_dir.mkdir(exist_ok=True)
 
-    limpiar_carpeta_por_lambda(per_lambda_dir)
-
     # ------------------------------------------------------------
     # 3. Leer encabezado de plantilla .rxt
     # ------------------------------------------------------------
     header_lines = extraer_encabezado_rxt(RXT_TEMPLATE_PATH)
 
     # ------------------------------------------------------------
-    # 4. Guardar documentación del ajuste Phan-Sierra
+    # 4. Referencia Phan-Sierra (una sola vez en IAD_run/)
     # ------------------------------------------------------------
+    print(f"[Phan-Sierra] ubicación = {PHAN_UBICACION}")
     print(f"[Phan-Sierra] modo = {PHAN_SIERRA_MODE}")
     print(f"[Phan-Sierra] A = {PHAN_SIERRA_A_MM:.8f} mm^-1")
     print(f"[Phan-Sierra] B = {PHAN_SIERRA_B:.8f}")
@@ -857,155 +1099,58 @@ def main():
     graficar_phan_sierra(iad_dir / "grafica_phan_sierra.png")
 
     # ============================================================
-    # MODO NORMAL — un solo espectro (M_R_data.csv)
+    # MODO SINGLE — un solo sujeto, un espectro
     # ============================================================
-    if not MODO_TEMPORAL:
-        if not MR_CSV_PATH.exists():
-            raise FileNotFoundError(f"No existe el archivo CSV: {MR_CSV_PATH}")
-
-        df_mr = leer_csv_mr(MR_CSV_PATH)
-        graficar_mu_sp_escenarios(df_mr, iad_dir / "grafica_mu_sp_escenarios.png")
-
-        resultados = []
-        total = len(df_mr) * len(ESCENARIOS_MUSP)
-        t_inicio = time.time()
-        contador = 0
-
-        for escenario in ESCENARIOS_MUSP:
-            for _, row in df_mr.iterrows():
-                wavelength = float(row["wavelength_nm"])
-                reflectance = float(row["reflectance"])
-
-                fila = _correr_iad_una_lambda(
-                    wavelength,
-                    reflectance,
-                    header_lines,
-                    per_lambda_dir,
-                    IAD_EXE_PATH,
-                    escenario=escenario,
-                    factor_musp=1.0,
-                )
-                resultados.append(fila)
-                contador += 1
-                _progreso(contador, total, t_inicio)
-
-        df_resultados = pd.DataFrame(resultados).sort_values(["escenario", "lambda_nm"])
-        ruta_resumen = iad_dir / "resumen_resultados_phan_sierra.csv"
-        df_resultados.to_csv(ruta_resumen, index=False)
-
-        graficar_mu_a_sensibilidad(df_resultados, iad_dir / "grafica_mu_a_sensibilidad.png")
-        ruta_metricas = generar_comparaciones_mu_a_desde_csv(ruta_resumen, iad_dir)
-
-        print("\nEjecución terminada.")
-        print(f"Tabla Phan-Sierra guardada en: {ruta_tabla_phan_sierra}")
-        print(f"Resumen guardado en: {ruta_resumen}")
-        if ruta_metricas is not None:
-            print(f"Métricas μa vs Phan guardadas en: {ruta_metricas}")
-        print(f"Gráficas guardadas en: {iad_dir}")
+    if MODO == "single":
+        csv_path = seleccionar_sujeto(temporal=False)
+        output_dir = csv_path.parent / "IAD_results"
+        output_dir.mkdir(exist_ok=True)
+        print(f"\n[Single] Procesando → {output_dir}")
+        procesar_sujeto_single(csv_path, output_dir, header_lines, per_lambda_dir)
 
     # ============================================================
-    # MODO TEMPORAL — serie temporal (M_R_tiempo_data.csv)
+    # MODO TEMPORAL — un solo sujeto, serie temporal
     # ============================================================
+    elif MODO == "temporal":
+        csv_path = seleccionar_sujeto(temporal=True)
+        output_dir = csv_path.parent / "IAD_results"
+        output_dir.mkdir(exist_ok=True)
+        print(f"\n[Temporal] Procesando → {output_dir}")
+        procesar_sujeto_temporal(csv_path, output_dir, header_lines, per_lambda_dir)
+
+    # ============================================================
+    # MODO BATCH_ALL — todos los sujetos secuencialmente
+    # ============================================================
+    elif MODO == "batch_all":
+        sujetos = listar_todos_sujetos()
+        print(f"\n[Batch] {len(sujetos)} sujetos encontrados en {MEDICIONES_DIR}")
+
+        for i, (carpeta, es_temporal) in enumerate(sujetos, 1):
+            csv_name = CSV_TEMPORAL_NAME if es_temporal else CSV_SINGLE_NAME
+            csv_path = carpeta / "series" / csv_name
+            output_dir = carpeta / "series" / "IAD_results"
+            output_dir.mkdir(exist_ok=True)
+
+            tipo = "temporal" if es_temporal else "single"
+            print(f"\n{'='*60}")
+            print(f"[Batch {i}/{len(sujetos)}] {carpeta.name} ({tipo})")
+            print(f"{'='*60}")
+
+            try:
+                if es_temporal:
+                    procesar_sujeto_temporal(csv_path, output_dir, header_lines, per_lambda_dir)
+                else:
+                    procesar_sujeto_single(csv_path, output_dir, header_lines, per_lambda_dir)
+            except Exception as e:
+                print(f"  [ERROR] {carpeta.name}: {e}")
+                continue
+
+        print(f"\n[Batch] Completado. Resultados en cada carpeta de sujeto.")
+
     else:
-        csv_temporal_path = base_dir / CSV_TEMPORAL_NAME
-        if not csv_temporal_path.exists():
-            raise FileNotFoundError(f"No existe el CSV temporal: {csv_temporal_path}")
+        raise ValueError(f"MODO desconocido: '{MODO}'. Usa 'single', 'temporal' o 'batch_all'.")
 
-        mediciones = leer_csv_mr_temporal(csv_temporal_path)
-
-        ids_medicion = sorted(mediciones.keys())
-        ids_medicion = [m for m in ids_medicion if m >= INICIO_MEDICION]
-        if MAX_MEDICIONES is not None:
-            ids_medicion = ids_medicion[:MAX_MEDICIONES]
-
-        if VENTANA_PROMEDIO > 1:
-            grupos = [ids_medicion[i:i + VENTANA_PROMEDIO] for i in range(0, len(ids_medicion), VENTANA_PROMEDIO)]
-            mediciones_prom = {}
-            for grupo in grupos:
-                rep_id = grupo[0]
-                tiempo_prom = sum(mediciones[m]["tiempo"] for m in grupo) / len(grupo)
-                wls = [wl for wl, _ in mediciones[grupo[0]]["espectro"]]
-                n = len(grupo)
-                refs_prom = [sum(mediciones[m]["espectro"][j][1] for m in grupo) / n for j in range(len(wls))]
-                mediciones_prom[rep_id] = {
-                    "tiempo": tiempo_prom,
-                    "espectro": list(zip(wls, refs_prom)),
-                }
-            ids_medicion = [g[0] for g in grupos]
-            mediciones = mediciones_prom
-
-        total_med = len(ids_medicion)
-
-        tareas = [
-            (escenario, med_id, mediciones[med_id]["tiempo"], float(wl), float(ref))
-            for escenario in ESCENARIOS_MUSP
-            for med_id in ids_medicion
-            for wl, ref in mediciones[med_id]["espectro"]
-        ]
-        total_tareas = len(tareas)
-
-        print(
-            f"Mediciones a procesar: {total_med}  |  "
-            f"Tareas IAD totales: {total_tareas}  |  Workers: {WORKERS}"
-        )
-
-        def _tarea(escenario, med_id, tiempo, wl, ref):
-            fila = _correr_iad_una_lambda(
-                wl,
-                ref,
-                header_lines,
-                per_lambda_dir,
-                IAD_EXE_PATH,
-                escenario=escenario,
-                factor_musp=1.0,
-                med_id=med_id,
-            )
-            fila["medicion"] = med_id
-            fila["tiempo"] = tiempo
-            return fila
-
-        resultados = []
-        t_inicio = time.time()
-
-        if WORKERS <= 1:
-            for i, tarea in enumerate(tareas, 1):
-                resultados.append(_tarea(*tarea))
-                _progreso(i, total_tareas, t_inicio)
-        else:
-            with ThreadPoolExecutor(max_workers=WORKERS) as executor:
-                futuros = {executor.submit(_tarea, *t): t for t in tareas}
-                completadas = 0
-                for fut in as_completed(futuros):
-                    resultados.append(fut.result())
-                    completadas += 1
-                    _progreso(completadas, total_tareas, t_inicio)
-
-        df_resultados = pd.DataFrame(resultados)
-        cols_primeras = [
-            "escenario",
-            "factor_musp",
-            "medicion",
-            "tiempo",
-            "lambda_nm",
-            "reflectance_input",
-            "mu_a_mm-1",
-            "mu_s_prime_mm-1",
-            "g",
-        ]
-        cols_resto = [c for c in df_resultados.columns if c not in cols_primeras]
-        df_resultados = df_resultados[cols_primeras + cols_resto]
-        df_resultados = df_resultados.sort_values(["escenario", "medicion", "lambda_nm"])
-
-        ruta_resumen = base_dir / CSV_SALIDA_TEMPORAL
-        ruta_resumen.parent.mkdir(exist_ok=True)
-        df_resultados.to_csv(ruta_resumen, index=False)
-
-        print("\nEjecución temporal terminada.")
-        print(f"Mediciones procesadas: {total_med}")
-        print(f"Resumen temporal guardado en: {ruta_resumen}")
-
-    print(f"Carpeta principal IAD: {iad_dir}")
-    print(f"Archivos por lambda: {per_lambda_dir}")
+    print(f"\nReferencia Phan-Sierra en: {iad_dir}")
 
 
 if __name__ == "__main__":
