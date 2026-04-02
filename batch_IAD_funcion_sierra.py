@@ -9,11 +9,75 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+plt.rcParams.update({
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+    "font.size": 9,
+    "axes.labelsize": 10,
+    "axes.titlesize": 10,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "legend.fontsize": 9,
+    "axes.linewidth": 0.8,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
+})
 
 # ============================================================
-# CONFIGURACIÓN
+# CONFIGURACIÓN DEL SISTEMA
+# ============================================================
+#None = todos los sujetos o mediciones; int = número máximo a procesar.
+INICIO_MEDICION = None #Espectro a partir del cual se comenzará el procesado.
+MAX_MEDICIONES = None #En caso de que no se quiera procesar todas las mediciones, se puede limitar el número máximo. 
+VENTANA_PROMEDIO = 50 # Se promedian estos espectros, reduce resolución temporal pero mejora Signal to Noise Ratio. Solo para modo temporal.
+
+WORKERS = os.cpu_count() - 1 or 4 #Hilos a usar para paralelización del IAD
+
+# ============================================================
+# CONFIGURACIÓN DELMODELO ÓPTICO
 # ============================================================
 
+# ── TOGGLE PRINCIPAL ──
+MODO = "single"   # "single"    → un espectro (M_R_data.csv)
+                     # "temporal"  → serie temporal (M_R_tiempo_data.csv)
+                     # "batch_all" → procesa TODOS los sujetos en Mediciones/
+
+# g fijo y N fijo.
+USAR_G_FIJO = True
+G_FIJO = 0.8
+N_TEJIDO = 1.41  # Solo genera el formato; IAD toma la refracción del .rxt/header
+PHAN_UBICACION = "Cheek"
+# Opciones: "Forehead", "Cheek", "Ventral Forearm", "Palm", "Back",
+#           "Upper Arm", "Dorsal Forearm", "Neck", "Shin", "Chest"
+# Modo rápido omite el "sanity check" que IAD hace con una simulación Montecarlo.
+USAR_MODO_RAPIDO = True
+# Mostrar o no el comando completo por cada lambda
+MOSTRAR_COMANDOS = False
+
+# Modelo de μs'(λ): Phan-Sierra
+PHAN_SIERRA_MODE = "powerlaw"   # opciones: "powerlaw" o "pchip"
+PHAN_SIERRA_ALLOW_EXTRAPOLATION = False
+PHAN_SIERRA_LAMBDA_REF_NM = 526.0  # λ_ref del ajuste por ley de potencia
+
+# Referencia de μa(λ) de Phan usada solo en postanálisis
+# (métricas y overlay visual). No entra como input a IAD.
+PHAN_MUA_INTERP_MODE = "pchip"
+PHAN_MUA_ALLOW_EXTRAPOLATION = False
+PHAN_MUA_NORM_LAMBDA_REF_NM = 526.0  # λ_ref para normalizar μa_IAD y μa_Phan
+
+# Sensibilidad basada en literatura: nominal y banda ±1σ de Phan.
+ESCENARIOS_MUSP = ("menos_1sd", "nominal", "mas_1sd")
+GENERAR_GRAFICA_PHAN_SIERRA_PNG = True
+GENERAR_GRAFICA_PHAN_SIERRA_PDF = True
+GENERAR_DASHBOARD_MUA_PNG = True
+GENERAR_DASHBOARD_MUA_PDF = True
+
+# ============================================================
+# GESTIÓN DE CARPETAS
+# ============================================================
+# Nombres de archivos CSV dentro de series/
+CSV_SINGLE_NAME = "M_R_data.csv"
+CSV_TEMPORAL_NAME = "M_R_tiempo_data.csv"
 # Carpeta de mediciones
 MEDICIONES_DIR = Path(__file__).parent / "Mediciones"
 # Selección automática del último sujeto (True) o selector interactivo (False)
@@ -28,44 +92,11 @@ IAD_FOLDER_NAME = "IAD_run"
 IAD_PER_LAMBDA_FOLDER_NAME = "por_lambda"
 
 # ============================================================
-# MODELO ÓPTICO FIJO
-# ============================================================
-
-# g fijo y n fijo, como acordamos.
-USAR_G_FIJO = True
-G_FIJO = 0.8
-N_TEJIDO = 1.41  # actualmente solo documental; IAD lo toma del .rxt/header
-
-# Modo rápido omite el "sanity check" que IAD hace con una simulación Montecarlo.
-USAR_MODO_RAPIDO = True
-# Mostrar o no el comando completo por cada lambda
-MOSTRAR_COMANDOS = False
-
-# ── TOGGLE PRINCIPAL ──
-MODO = "single"   # "single"    → un espectro (M_R_data.csv)
-                     # "temporal"  → serie temporal (M_R_tiempo_data.csv)
-                     # "batch_all" → procesa TODOS los sujetos en Mediciones/
-
-# Nombres de archivos CSV dentro de series/
-CSV_SINGLE_NAME = "M_R_data.csv"
-CSV_TEMPORAL_NAME = "M_R_tiempo_data.csv"
-INICIO_MEDICION = 22
-MAX_MEDICIONES = None
-VENTANA_PROMEDIO = 50
-WORKERS = os.cpu_count() - 1 or 4
-
-
-# ============================================================
 # FUNCIÓN PHAN-SIERRA para μs'(λ)
 # ============================================================
 # Datos de μs' y μa medidos por SFDI en 10 ubicaciones anatómicas.
 # Fuente: Phan et al., JBO 26(2) 026001, Supplementary Tables 2 & 3.
 # λ (nm): 471, 526, 591, 621, 659, 691, 731, 851
-
-# ── CONFIGURACIÓN: elegir ubicación anatómica de referencia ──
-PHAN_UBICACION = "Cheek"
-# Opciones: "Forehead", "Cheek", "Ventral Forearm", "Palm", "Back",
-#           "Upper Arm", "Dorsal Forearm", "Neck", "Shin", "Chest"
 
 PHAN_DATOS = {
     "Forehead":        {"musp": [2.12, 1.75, 1.56, 1.53, 1.46, 1.46, 1.51, 1.65],
@@ -112,26 +143,11 @@ PHAN_MUSP_MM    = np.array(_ub["musp"],    dtype=float)
 PHAN_MUSP_SD_MM = np.array(_ub["musp_sd"], dtype=float)
 PHAN_MUA_MM     = np.array(_ub["mua"],     dtype=float)
 
-# Selector de modelo para μs'(λ)
-PHAN_SIERRA_MODE = "pchip"   # opciones: "powerlaw" o "pchip"
-PHAN_SIERRA_ALLOW_EXTRAPOLATION = False
-
-# Referencia para el ajuste compacto por ley de potencia
-PHAN_SIERRA_LAMBDA_REF_NM = 526.0
-
 _x = np.log(PHAN_LAMBDA_NM / PHAN_SIERRA_LAMBDA_REF_NM)
 _y = np.log(PHAN_MUSP_MM)
 _slope, _intercept = np.polyfit(_x, _y, 1)
-
 PHAN_SIERRA_A_MM = float(np.exp(_intercept))
 PHAN_SIERRA_B = float(-_slope)
-
-PHAN_MUA_INTERP_MODE = "pchip"
-PHAN_MUA_ALLOW_EXTRAPOLATION = False
-PHAN_MUA_NORM_LAMBDA_REF_NM = 526.0
-
-# Sensibilidad basada en literatura: nominal y banda ±1σ de Phan.
-ESCENARIOS_MUSP = ("menos_1sd", "nominal", "mas_1sd")
 
 try:
     from scipy.interpolate import PchipInterpolator
@@ -347,47 +363,13 @@ def tabla_phan_sierra() -> pd.DataFrame:
             "lambda_nm": PHAN_LAMBDA_NM,
             "mu_s_prime_phan_mm-1": PHAN_MUSP_MM,
             "mu_s_prime_sd_phan_mm-1": PHAN_MUSP_SD_MM,
+            # Se conserva como referencia literaria en la tabla exportada.
+            # No se usa como input del modelo IAD.
             "mu_a_phan_mm-1": PHAN_MUA_MM,
             "mu_s_prime_phan_sierra_powerlaw_mm-1": ajuste_powerlaw,
             "mu_s_prime_phan_sierra_pchip_mm-1": ajuste_pchip,
         }
     )
-
-
-
-def leer_resumen_iad_desde_csv(csv_path: Path) -> pd.DataFrame:
-    """
-    Lee el CSV de salida de IAD.
-
-    Prioriza columnas con nombre; si no existen, usa:
-    - lambda en la tercera columna
-    - μa en la antepenúltima columna
-    """
-    df = pd.read_csv(csv_path)
-    columnas = list(df.columns)
-
-    if "lambda_nm" not in df.columns:
-        if len(columnas) < 3:
-            raise ValueError("El CSV no tiene una tercera columna para lambda.")
-        df["lambda_nm"] = pd.to_numeric(df.iloc[:, 2], errors="coerce")
-
-    if "mu_a_mm-1" not in df.columns:
-        if len(columnas) < 3:
-            raise ValueError("El CSV no tiene suficientes columnas para extraer μa antepenúltimo.")
-        df["mu_a_mm-1"] = pd.to_numeric(df.iloc[:, -3], errors="coerce")
-
-    if "escenario" not in df.columns:
-        df["escenario"] = "nominal"
-
-    if "returncode" in df.columns:
-        df = df[pd.to_numeric(df["returncode"], errors="coerce").fillna(-1) == 0]
-
-    if "txt_found" in df.columns:
-        df = df[df["txt_found"].astype(str).str.lower().isin(["true", "1"])]
-
-    df["lambda_nm"] = pd.to_numeric(df["lambda_nm"], errors="coerce")
-    df["mu_a_mm-1"] = pd.to_numeric(df["mu_a_mm-1"], errors="coerce")
-    return df.dropna(subset=["lambda_nm", "mu_a_mm-1"]).copy()
 
 
 
@@ -629,6 +611,17 @@ def limpiar_carpeta_por_lambda(carpeta: Path):
             archivo.unlink()
 
 
+def _aplicar_estilo_publicacion(ax):
+    """Estilo sobrio para figuras de óptica biomédica."""
+    ax.set_facecolor("white")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(0.8)
+    ax.spines["bottom"].set_linewidth(0.8)
+    ax.tick_params(axis="both", which="major", direction="out", length=4, width=0.8, color="#222222")
+    ax.grid(True, color="#d7d7d7", linewidth=0.6, alpha=0.5)
+
+
 
 def graficar_phan_sierra(ruta_png: Path, mostrar: bool = False):
     """Grafica datos Palm de Phan y las dos versiones de Phan-Sierra."""
@@ -636,27 +629,36 @@ def graficar_phan_sierra(ruta_png: Path, mostrar: bool = False):
     mu_powerlaw = np.asarray(phan_sierra_mu_sp_mm(lambda_plot, mode="powerlaw"), dtype=float)
     mu_pchip = np.asarray(phan_sierra_mu_sp_mm(lambda_plot, mode="pchip"), dtype=float)
 
-    plt.figure(figsize=(8, 5))
-    plt.plot(lambda_plot, mu_powerlaw, label="Phan-Sierra (powerlaw)", lw=2.0, alpha=0.9)
-    plt.plot(lambda_plot, mu_pchip, label="Phan-Sierra (pchip)", lw=2.2, alpha=0.9)
-    plt.errorbar(
+    fig, ax = plt.subplots(figsize=(8, 5))
+    _aplicar_estilo_publicacion(ax)
+    ax.plot(lambda_plot, mu_powerlaw, label="Phan-Sierra (powerlaw)", lw=2.0, color="#111111")
+    ax.plot(lambda_plot, mu_pchip, label="Phan-Sierra (pchip)", lw=2.0, ls="--", color="#0072B2")
+    ax.errorbar(
         PHAN_LAMBDA_NM,
         PHAN_MUSP_MM,
         yerr=PHAN_MUSP_SD_MM,
         fmt="o",
-        ms=6,
-        capsize=4,
+        ms=5,
+        mfc="white",
+        mec="#111111",
+        mew=1.0,
+        ecolor="#7f7f7f",
+        elinewidth=0.9,
+        capsize=2.5,
+        capthick=0.9,
         label="Palm de Phan et al. (media ± sd)",
     )
-    plt.xlabel("Longitud de onda (nm)")
-    plt.ylabel("μs' (1/mm)")
-    plt.title("Función Phan-Sierra para μs'(λ)")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
+    ax.set_xlabel("Longitud de onda (nm)")
+    ax.set_ylabel("μs' (1/mm)")
+    ax.set_title("Función Phan-Sierra para μs'(λ)")
+    ax.legend(frameon=False, loc="best", handlelength=2.6)
+    fig.tight_layout()
     if mostrar:
         plt.show()
-    plt.savefig(ruta_png, dpi=300, bbox_inches="tight")
+    if GENERAR_GRAFICA_PHAN_SIERRA_PNG:
+        plt.savefig(ruta_png, dpi=300, bbox_inches="tight")
+    if GENERAR_GRAFICA_PHAN_SIERRA_PDF:
+        plt.savefig(ruta_png.with_suffix(".pdf"), bbox_inches="tight")
     plt.close()
 
 
@@ -671,11 +673,12 @@ def graficar_dashboard_mu_a(df_resultados: pd.DataFrame, ruta_png: Path):
         return
 
     fig, ax = plt.subplots(figsize=(10, 6))
+    _aplicar_estilo_publicacion(ax)
 
     estilos = {
-        "nominal": {"lw": 2.0, "ls": "-", "marker": "o", "ms": 3.5},
-        "menos_1sd": {"lw": 1.4, "ls": "--", "marker": None, "ms": 0},
-        "mas_1sd": {"lw": 1.4, "ls": "--", "marker": None, "ms": 0},
+        "nominal": {"lw": 2.0, "ls": "-", "marker": "o", "ms": 3.2, "color": "#111111"},
+        "menos_1sd": {"lw": 1.6, "ls": "--", "marker": None, "ms": 0, "color": "#0072B2"},
+        "mas_1sd": {"lw": 1.6, "ls": "-.", "marker": None, "ms": 0, "color": "#D55E00"},
     }
     for escenario in ["menos_1sd", "nominal", "mas_1sd"]:
         sub = df_plot[df_plot["escenario"] == escenario].sort_values("lambda_nm")
@@ -686,6 +689,7 @@ def graficar_dashboard_mu_a(df_resultados: pd.DataFrame, ruta_png: Path):
             sub["lambda_nm"], sub["mu_a_mm-1"],
             marker=est["marker"], markersize=est["ms"],
             linewidth=est["lw"], linestyle=est["ls"],
+            color=est["color"],
             label=escenario,
         )
 
@@ -699,26 +703,30 @@ def graficar_dashboard_mu_a(df_resultados: pd.DataFrame, ruta_png: Path):
             PHAN_MUA_MM[mascara_ref],
             linestyle="None",
             marker="o",
-            markersize=7.0,
-            markeredgewidth=1.2,
-            color="black",
+            markersize=5.5,
+            markerfacecolor="white",
+            markeredgewidth=1.0,
+            markeredgecolor="#111111",
             label=f"μa Phan ({PHAN_UBICACION})",
         )
 
     ax.set_xlabel("Longitud de onda (nm)")
     ax.set_ylabel("μa recuperado (1/mm)")
     ax.set_title(f"Sensibilidad de μa — ref: {PHAN_UBICACION} (Phan et al.)")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
+    ax.legend(frameon=False, loc="best", handlelength=2.6)
 
     plt.tight_layout()
-    plt.savefig(ruta_png, dpi=200, bbox_inches="tight")
+    if GENERAR_DASHBOARD_MUA_PNG:
+        plt.savefig(ruta_png, dpi=200, bbox_inches="tight")
+    if GENERAR_DASHBOARD_MUA_PDF:
+        plt.savefig(ruta_png.with_suffix(".pdf"), bbox_inches="tight")
     plt.close()
 
 
 
 def generar_metricas_mu_a(df_resultados: pd.DataFrame, output_dir: Path) -> Path | None:
     """Computa métricas de error μa_IAD vs μa_Phan por escenario. Solo CSV, sin gráficas."""
+    # Esta etapa se mantiene como benchmark/postanálisis y no altera la inversión IAD.
     df_resumen = df_resultados.dropna(subset=["lambda_nm", "mu_a_mm-1"]).copy()
     if df_resumen.empty:
         return None
@@ -749,8 +757,8 @@ def _correr_iad_una_lambda(
     per_lambda_dir: Path,
     iad_exe_path: Path,
     escenario: str,
-    factor_musp: float,
     med_id: int = 0,
+    task_id: int = 0,
 ) -> dict:
     """Ejecuta IAD para una sola (λ, reflectancia) y devuelve el dict de resultado."""
     reflectance = max(reflectance, 1e-4)
@@ -761,7 +769,9 @@ def _correr_iad_una_lambda(
     )
     g_valor = G_FIJO if USAR_G_FIJO else g_ma_et_al(wavelength)
 
-    if med_id != 0:
+    if task_id != 0:
+        base_name = f"{escenario}_task{task_id:06d}_lambda_{wavelength:.2f}".replace(".", "p")
+    elif med_id != 0:
         base_name = f"{escenario}_med{med_id:06d}_lambda_{wavelength:.2f}".replace(".", "p")
     else:
         base_name = f"{escenario}_lambda_{wavelength:.2f}".replace(".", "p")
@@ -930,27 +940,42 @@ def procesar_sujeto_single(
     df_mr = leer_csv_mr(csv_path)
 
     resultados = []
-    total = len(df_mr) * len(ESCENARIOS_MUSP)
+    tareas = [
+        (idx, escenario, float(row["wavelength_nm"]), float(row["reflectance"]))
+        for escenario in ESCENARIOS_MUSP
+        for idx, (_, row) in enumerate(df_mr.iterrows(), 1)
+    ]
+    total = len(tareas)
     t_inicio = time.time()
-    contador = 0
 
-    for escenario in ESCENARIOS_MUSP:
-        for _, row in df_mr.iterrows():
-            wavelength = float(row["wavelength_nm"])
-            reflectance = float(row["reflectance"])
+    print(
+        f"  Mediciones: {len(df_mr)}  |  "
+        f"Tareas IAD: {total}  |  Workers: {WORKERS}"
+    )
 
-            fila = _correr_iad_una_lambda(
-                wavelength,
-                reflectance,
-                header_lines,
-                per_lambda_dir,
-                IAD_EXE_PATH,
-                escenario=escenario,
-                factor_musp=1.0,
-            )
-            resultados.append(fila)
-            contador += 1
-            _progreso(contador, total, t_inicio)
+    def _tarea(task_id, escenario, wavelength, reflectance):
+        return _correr_iad_una_lambda(
+            wavelength,
+            reflectance,
+            header_lines,
+            per_lambda_dir,
+            IAD_EXE_PATH,
+            escenario=escenario,
+            task_id=task_id,
+        )
+
+    if WORKERS <= 1:
+        for i, tarea in enumerate(tareas, 1):
+            resultados.append(_tarea(*tarea))
+            _progreso(i, total, t_inicio)
+    else:
+        with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+            futuros = {executor.submit(_tarea, *t): t for t in tareas}
+            completadas = 0
+            for fut in as_completed(futuros):
+                resultados.append(fut.result())
+                completadas += 1
+                _progreso(completadas, total, t_inicio)
 
     df_resultados = pd.DataFrame(resultados).sort_values(["escenario", "lambda_nm"])
     ruta_resumen = output_dir / "resumen_resultados_phan_sierra.csv"
@@ -1021,7 +1046,6 @@ def procesar_sujeto_temporal(
             per_lambda_dir,
             IAD_EXE_PATH,
             escenario=escenario,
-            factor_musp=1.0,
             med_id=med_id,
         )
         fila["medicion"] = med_id

@@ -1,5 +1,5 @@
 # Importación de librerías necesarias
-import atexit, json, os, re, sys, clr
+import atexit, json, os, re, shutil, sys, clr
 from datetime import datetime
 from System import *
 import numpy as np
@@ -48,9 +48,9 @@ FRECUENCIA_CORTE_BUTTER = 0.1  # Frecuencia de corte normalizada (0-1, Nyquist=1
 ORDEN_FILTRO_BUTTER = 6         # Orden del filtro Butterworth
 
 # ========== RANGO DE LONGITUDES DE ONDA (TRUNCADO) ==========
-LAMBDA_MIN = 500  # Longitud de onda mínima en nm
-LAMBDA_MAX = 600  # Longitud de onda máxima en nm
-muestras_objetivo = 100  # Número de muestras deseadas después del diezmado
+LAMBDA_MIN = 400  # Longitud de onda mínima en nm
+LAMBDA_MAX = 700  # Longitud de onda máxima en nm
+muestras_objetivo = 300  # Número de muestras deseadas después del diezmado
 # ============================================================
 print(f"Configuración:")
 print(f"  - Tiempo de integración: {TIEMPO_INTEGRACION_INICIAL*1000} ms")
@@ -142,10 +142,30 @@ def tomar_serie_adquisiciones(spec, tiempo_integracion, num_mediciones, tiempo_e
 
     # Promediar todas las mediciones
     intensidad_promedio = np.mean(mediciones, axis=0)
-    
+
     print(f"✓ Serie completada. Promedio calculado.\n")
-    
-    return intensidad_promedio
+
+    return intensidad_promedio, mediciones
+
+
+def guardar_trueraw_estatico_csv(ruta_csv, mediciones, wavelengths_completas):
+    """
+    Guarda los scans individuales sin truncado, sin filtro y sin diezmado.
+
+    Formato:
+    medicion,lambda,intensidad
+    """
+    rows = []
+    for medicion, espectro in enumerate(mediciones, start=1):
+        n = len(wavelengths_completas)
+        rows.append(np.column_stack([
+            np.full(n, medicion), wavelengths_completas, espectro
+        ]))
+    df = pd.DataFrame(np.vstack(rows), columns=["medicion", "lambda", "intensidad"])
+    df["medicion"] = df["medicion"].astype(int)
+    df.to_csv(ruta_csv, index=False)
+    return ruta_csv
+
 
 def optimizar_tiempo_integracion(spec, tiempo_inicial, umbral_saturacion_absoluto=60000, factor_incremento=1.15, max_iteraciones=20):
     """
@@ -579,7 +599,7 @@ else:
     print("SERIE R_0")
     print("=" * 50)
 
-    R_0 = tomar_serie_adquisiciones(
+    R_0, scans_r0 = tomar_serie_adquisiciones(
         spec,
         TIEMPO_INTEGRACION,
         NUM_MEDICIONES_PROMEDIO,
@@ -589,6 +609,8 @@ else:
     print(f"R_0 guardado. Shape: {R_0.shape}")
     print(f"Rango de intensidades: {R_0.min():.6f} - {R_0.max():.6f}")
     print(f"Tiempo de integración usado para R_0: {TIEMPO_INTEGRACION*1000:.2f} ms")
+    guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_0_trueraw_data.csv'), scans_r0, wavelengths)
+    print(f"  - R_0_trueraw_data.csv guardado.")
 
     # TOMA DE R_1
     if not confirmar_simple("¿Iniciar serie R_1?"):
@@ -598,7 +620,7 @@ else:
     print("SERIE R_1")
     print("=" * 50)
 
-    R_1 = tomar_serie_adquisiciones(
+    R_1, scans_r1 = tomar_serie_adquisiciones(
         spec,
         TIEMPO_INTEGRACION,
         NUM_MEDICIONES_PROMEDIO,
@@ -607,6 +629,8 @@ else:
 
     print(f"R_1 guardado. Shape: {R_1.shape}")
     print(f"Rango de intensidades: {R_1.min():.6f} - {R_1.max():.6f}")
+    guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_1_trueraw_data.csv'), scans_r1, wavelengths)
+    print(f"  - R_1_trueraw_data.csv guardado.")
 
     meta_guardada = guardar_calibracion(
         ruta_calibracion_npz,
@@ -621,6 +645,11 @@ else:
     print(f"  - Archivo datos: {ruta_calibracion_npz}")
     print(f"  - Archivo metadata: {ruta_calibracion_meta}")
     print(f"  - Fecha calibración: {meta_guardada['fecha_calibracion']}")
+
+# Copiar calibración usada a la carpeta del sujeto para trazabilidad
+shutil.copy(ruta_calibracion_npz, os.path.join(ruta_series, 'calibracion_usada.npz'))
+shutil.copy(ruta_calibracion_meta, os.path.join(ruta_series, 'calibracion_usada.json'))
+print(f"\nCopia de calibración guardada en series/ para trazabilidad.")
 
 # Mostrar resultado solo si se realizó optimización
 if optimizacion_realizada:
@@ -657,15 +686,17 @@ print("=" * 50)
 print("SERIE R_M")
 print("=" * 50)
 
-R_M = tomar_serie_adquisiciones(
-    spec, 
-    TIEMPO_INTEGRACION, 
-    NUM_MEDICIONES_PROMEDIO, 
+R_M, scans_rm = tomar_serie_adquisiciones(
+    spec,
+    TIEMPO_INTEGRACION,
+    NUM_MEDICIONES_PROMEDIO,
     TIEMPO_ESPERA
 )
 
 print(f"R_M guardado. Shape: {R_M.shape}")
 print(f"Rango de intensidades: {R_M.min():.6f} - {R_M.max():.6f}")
+guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_M_trueraw_data.csv'), scans_rm, wavelengths)
+print(f"  - R_M_trueraw_data.csv guardado.")
 
 # ========== PROCESAMIENTO DE SEÑAL ==========
 # 1. Truncar al rango de interés

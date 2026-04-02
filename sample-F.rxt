@@ -13,7 +13,7 @@ IAD1   # Must be first four characters
 50.8  # [mm] Sphere Diameter  (8 in * 25.4 mm/in)
 12.7   # [mm] Sample Port Diameter
 12.7   # [mm] Entrance Port Diameter
-12.9   # [mm] Detector Port Diameter
+3   # [mm] Detector Port Diameter
 0.99   # Reflectivity of the sphere wall
 
        # Properties of sphere used for transmission measurements
