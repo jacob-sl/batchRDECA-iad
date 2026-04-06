@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")   # backend no interactivo: evita errores de Tk en hilos worker
 import matplotlib.pyplot as plt
 
 plt.rcParams.update({
@@ -46,7 +48,7 @@ MODO = "single"   # "single"    → un espectro (M_R_data.csv)
 USAR_G_FIJO = True
 G_FIJO = 0.8
 N_TEJIDO = 1.41  # Solo genera el formato; IAD toma la refracción del .rxt/header
-PHAN_UBICACION = "Cheek"
+PHAN_UBICACION = "Palm"
 # Opciones: "Forehead", "Cheek", "Ventral Forearm", "Palm", "Back",
 #           "Upper Arm", "Dorsal Forearm", "Neck", "Shin", "Chest"
 # Modo rápido omite el "sanity check" que IAD hace con una simulación Montecarlo.
@@ -55,18 +57,28 @@ USAR_MODO_RAPIDO = True
 MOSTRAR_COMANDOS = False
 
 # Modelo de μs'(λ): Phan-Sierra
-PHAN_SIERRA_MODE = "powerlaw"   # opciones: "powerlaw" o "pchip"
-PHAN_SIERRA_ALLOW_EXTRAPOLATION = False
+PHAN_SIERRA_MODE = "pchip"   # opciones: "powerlaw" o "pchip"
+PHAN_SIERRA_ALLOW_EXTRAPOLATION = True
+PHAN_MUSP_SD_ALLOW_EXTRAPOLATION = True
 PHAN_SIERRA_LAMBDA_REF_NM = 526.0  # λ_ref del ajuste por ley de potencia
 
 # Referencia de μa(λ) de Phan usada solo en postanálisis
 # (métricas y overlay visual). No entra como input a IAD.
 PHAN_MUA_INTERP_MODE = "pchip"
-PHAN_MUA_ALLOW_EXTRAPOLATION = False
+PHAN_MUA_ALLOW_EXTRAPOLATION = True
 PHAN_MUA_NORM_LAMBDA_REF_NM = 526.0  # λ_ref para normalizar μa_IAD y μa_Phan
 
-# Sensibilidad basada en literatura: nominal y banda ±1σ de Phan.
+# Sensibilidad basada en literatura: escenarios de μs' a computar.
+# Ejemplos:
+# ESCENARIOS_MUSP = ("nominal",)
+# ESCENARIOS_MUSP = ("menos_1sd", "nominal", "mas_1sd")
+ESCENARIOS_MUSP_VALIDOS = ("menos_1sd", "nominal", "mas_1sd")
 ESCENARIOS_MUSP = ("menos_1sd", "nominal", "mas_1sd")
+# Escenarios de incertidumbre de medición (σ_M_R por scan).
+# Requiere que M_R_data.csv tenga columna reflectance_std (generada por single_adq.py).
+# Si no existe esa columna, solo "nominal" es válido.
+ESCENARIOS_MR_STD_VALIDOS = ("menos_1sd", "nominal", "mas_1sd")
+ESCENARIOS_MR_STD = ("nominal",)
 GENERAR_GRAFICA_PHAN_SIERRA_PNG = True
 GENERAR_GRAFICA_PHAN_SIERRA_PDF = True
 GENERAR_DASHBOARD_MUA_PNG = True
@@ -97,6 +109,8 @@ IAD_PER_LAMBDA_FOLDER_NAME = "por_lambda"
 # Datos de μs' y μa medidos por SFDI en 10 ubicaciones anatómicas.
 # Fuente: Phan et al., JBO 26(2) 026001, Supplementary Tables 2 & 3.
 # λ (nm): 471, 526, 591, 621, 659, 691, 731, 851
+# Nota: para el ajuste por ley de potencia se excluye el último punto (851 nm).
+# Se conserva en las tablas y en la interpolación PCHIP como referencia literaria.
 
 PHAN_DATOS = {
     "Forehead":        {"musp": [2.12, 1.75, 1.56, 1.53, 1.46, 1.46, 1.51, 1.65],
@@ -142,9 +156,35 @@ PHAN_LAMBDA_NM  = np.array([471.0, 526.0, 591.0, 621.0, 659.0, 691.0, 731.0, 851
 PHAN_MUSP_MM    = np.array(_ub["musp"],    dtype=float)
 PHAN_MUSP_SD_MM = np.array(_ub["musp_sd"], dtype=float)
 PHAN_MUA_MM     = np.array(_ub["mua"],     dtype=float)
+PHAN_POWERLAW_LAMBDA_NM = PHAN_LAMBDA_NM[:-1]
+PHAN_POWERLAW_MUSP_MM = PHAN_MUSP_MM[:-1]
 
-_x = np.log(PHAN_LAMBDA_NM / PHAN_SIERRA_LAMBDA_REF_NM)
-_y = np.log(PHAN_MUSP_MM)
+if isinstance(ESCENARIOS_MUSP, str):
+    ESCENARIOS_MUSP = (ESCENARIOS_MUSP,)   # "nominal" → ("nominal",)
+
+escenarios_invalidos = [e for e in ESCENARIOS_MUSP if e not in ESCENARIOS_MUSP_VALIDOS]
+if escenarios_invalidos:
+    raise ValueError(
+        "ESCENARIOS_MUSP contiene valores no válidos: "
+        f"{escenarios_invalidos}. "
+        f"Opciones: {ESCENARIOS_MUSP_VALIDOS}"
+    )
+if not ESCENARIOS_MUSP:
+    raise ValueError("ESCENARIOS_MUSP no puede estar vacío.")
+
+if isinstance(ESCENARIOS_MR_STD, str):
+    ESCENARIOS_MR_STD = (ESCENARIOS_MR_STD,)
+_inv_mr = [e for e in ESCENARIOS_MR_STD if e not in ESCENARIOS_MR_STD_VALIDOS]
+if _inv_mr:
+    raise ValueError(
+        f"ESCENARIOS_MR_STD inválidos: {_inv_mr}. "
+        f"Opciones: {ESCENARIOS_MR_STD_VALIDOS}"
+    )
+if not ESCENARIOS_MR_STD:
+    raise ValueError("ESCENARIOS_MR_STD no puede estar vacío.")
+
+_x = np.log(PHAN_POWERLAW_LAMBDA_NM / PHAN_SIERRA_LAMBDA_REF_NM)
+_y = np.log(PHAN_POWERLAW_MUSP_MM)
 _slope, _intercept = np.polyfit(_x, _y, 1)
 PHAN_SIERRA_A_MM = float(np.exp(_intercept))
 PHAN_SIERRA_B = float(-_slope)
@@ -174,7 +214,14 @@ def leer_csv_mr(csv_path: Path) -> pd.DataFrame:
             f"Columnas encontradas: {list(df.columns)}"
         )
 
-    df = df[["wavelength_nm", "reflectance"]].copy()
+    cols = ["wavelength_nm", "reflectance"]
+    if "reflectance_std" in df.columns:
+        cols.append("reflectance_std")
+    else:
+        df["reflectance_std"] = 0.0
+        cols.append("reflectance_std")
+
+    df = df[cols].copy()
     df = df.dropna()
     return df
 
@@ -297,7 +344,7 @@ def phan_sierra_mu_sp_mm(
 def phan_musp_sd_mm(
     lambda_nm: float | np.ndarray,
     mode: str = "pchip",
-    allow_extrapolation: bool = False,
+    allow_extrapolation: bool = PHAN_MUSP_SD_ALLOW_EXTRAPOLATION,
 ):
     """Interpola la desviación estándar reportada por Phan para μs'."""
     return _interp_1d_phan(
@@ -338,13 +385,15 @@ def mu_sp_escenario_phan_mm(
     nominal y banda ±1σ de Phan.
     """
     mu_nominal = float(phan_sierra_mu_sp_mm(lambda_nm, mode=mode))
-    mu_sd = float(phan_musp_sd_mm(lambda_nm, mode="pchip", allow_extrapolation=False))
 
     if escenario == "nominal":
         mu_input = mu_nominal
+        mu_sd = float("nan")
     elif escenario == "menos_1sd":
+        mu_sd = float(phan_musp_sd_mm(lambda_nm, mode="pchip"))
         mu_input = max(1e-9, mu_nominal - mu_sd)
     elif escenario == "mas_1sd":
+        mu_sd = float(phan_musp_sd_mm(lambda_nm, mode="pchip"))
         mu_input = mu_nominal + mu_sd
     else:
         raise ValueError(f"Escenario desconocido para μs': {escenario}")
@@ -665,10 +714,13 @@ def graficar_phan_sierra(ruta_png: Path, mostrar: bool = False):
 
 def graficar_dashboard_mu_a(df_resultados: pd.DataFrame, ruta_png: Path):
     """
-    Gráfica de sensibilidad de μa recuperado a cambios en μs'(λ).
-    Muestra los 3 escenarios (nominal, ±1σ) superpuestos.
+    Gráfica de sensibilidad de μa recuperado.
+    - Líneas separadas por ESCENARIOS_MUSP (variabilidad de μs' de Phan).
+    - Banda fill_between por ESCENARIOS_MR_STD (variabilidad de medición σ_M_R).
     """
     df_plot = df_resultados.dropna(subset=["lambda_nm", "mu_a_mm-1", "escenario"]).copy()
+    if "escenario_mr" not in df_plot.columns:
+        df_plot["escenario_mr"] = "nominal"
     if df_plot.empty:
         return
 
@@ -676,22 +728,39 @@ def graficar_dashboard_mu_a(df_resultados: pd.DataFrame, ruta_png: Path):
     _aplicar_estilo_publicacion(ax)
 
     estilos = {
-        "nominal": {"lw": 2.0, "ls": "-", "marker": "o", "ms": 3.2, "color": "#111111"},
-        "menos_1sd": {"lw": 1.6, "ls": "--", "marker": None, "ms": 0, "color": "#0072B2"},
-        "mas_1sd": {"lw": 1.6, "ls": "-.", "marker": None, "ms": 0, "color": "#D55E00"},
+        "nominal":   {"lw": 2.0, "ls": "-",  "marker": "o",  "ms": 3.2, "color": "#111111"},
+        "menos_1sd": {"lw": 1.6, "ls": "--", "marker": None, "ms": 0,   "color": "#0072B2"},
+        "mas_1sd":   {"lw": 1.6, "ls": "-.", "marker": None, "ms": 0,   "color": "#D55E00"},
     }
-    for escenario in ["menos_1sd", "nominal", "mas_1sd"]:
-        sub = df_plot[df_plot["escenario"] == escenario].sort_values("lambda_nm")
+    for escenario in ESCENARIOS_MUSP:
+        sub = df_plot[df_plot["escenario"] == escenario]
         if sub.empty:
             continue
         est = estilos.get(escenario, estilos["nominal"])
-        ax.plot(
-            sub["lambda_nm"], sub["mu_a_mm-1"],
-            marker=est["marker"], markersize=est["ms"],
-            linewidth=est["lw"], linestyle=est["ls"],
-            color=est["color"],
-            label=escenario,
-        )
+
+        # Curva principal: escenario_mr == "nominal"
+        sub_nom = sub[sub["escenario_mr"] == "nominal"].sort_values("lambda_nm")
+        if not sub_nom.empty:
+            ax.plot(
+                sub_nom["lambda_nm"], sub_nom["mu_a_mm-1"],
+                marker=est["marker"], markersize=est["ms"],
+                linewidth=est["lw"], linestyle=est["ls"],
+                color=est["color"],
+                label=escenario,
+            )
+
+        # Banda fill_between de variabilidad de medición (σ_M_R)
+        if len(ESCENARIOS_MR_STD) > 1:
+            sub_m = sub[sub["escenario_mr"] == "menos_1sd"].sort_values("lambda_nm")
+            sub_p = sub[sub["escenario_mr"] == "mas_1sd"].sort_values("lambda_nm")
+            if not sub_m.empty and not sub_p.empty:
+                ax.fill_between(
+                    sub_m["lambda_nm"].values,
+                    sub_m["mu_a_mm-1"].values,
+                    sub_p["mu_a_mm-1"].values,
+                    alpha=0.18, color=est["color"],
+                    label=f"{escenario} ±1σ_MR",
+                )
 
     # Referencia μa de Phan: solo puntos medidos dentro del rango procesado.
     lambda_min = float(df_plot["lambda_nm"].min())
@@ -733,19 +802,24 @@ def generar_metricas_mu_a(df_resultados: pd.DataFrame, output_dir: Path) -> Path
 
     if "escenario" not in df_resumen.columns:
         df_resumen["escenario"] = "nominal"
+    if "escenario_mr" not in df_resumen.columns:
+        df_resumen["escenario_mr"] = "nominal"
 
     metricas = []
-    for escenario, sub in df_resumen.groupby("escenario", sort=True):
+    for (escenario, escenario_mr), sub in df_resumen.groupby(
+        ["escenario", "escenario_mr"], sort=True
+    ):
         df_comp = construir_comparacion_mu_a(sub)
         fila_metricas = calcular_metricas_mu_a(df_comp)
         fila_metricas["escenario"] = escenario
+        fila_metricas["escenario_mr"] = escenario_mr
         metricas.append(fila_metricas)
 
     if not metricas:
         return None
 
     ruta_metricas = output_dir / "metricas_mu_a_phan_por_escenario.csv"
-    pd.DataFrame(metricas).sort_values("escenario").to_csv(ruta_metricas, index=False)
+    pd.DataFrame(metricas).sort_values(["escenario", "escenario_mr"]).to_csv(ruta_metricas, index=False)
     return ruta_metricas
 
 
@@ -759,9 +833,16 @@ def _correr_iad_una_lambda(
     escenario: str,
     med_id: int = 0,
     task_id: int = 0,
+    escenario_mr: str = "nominal",
+    reflectance_std: float = 0.0,
 ) -> dict:
     """Ejecuta IAD para una sola (λ, reflectancia) y devuelve el dict de resultado."""
     reflectance = max(reflectance, 1e-4)
+    # Aplicar escenario de incertidumbre de medición
+    if   escenario_mr == "mas_1sd":   reflectance = reflectance + reflectance_std
+    elif escenario_mr == "menos_1sd": reflectance = max(1e-4, reflectance - reflectance_std)
+    # "nominal": sin cambio
+
     mu_sp_mm, mu_sp_nominal, mu_sp_sd, factor_aplicado = mu_sp_escenario_phan_mm(
         wavelength,
         escenario=escenario,
@@ -770,11 +851,11 @@ def _correr_iad_una_lambda(
     g_valor = G_FIJO if USAR_G_FIJO else g_ma_et_al(wavelength)
 
     if task_id != 0:
-        base_name = f"{escenario}_task{task_id:06d}_lambda_{wavelength:.2f}".replace(".", "p")
+        base_name = f"{escenario}_mr{escenario_mr}_task{task_id:06d}_lambda_{wavelength:.2f}".replace(".", "p")
     elif med_id != 0:
-        base_name = f"{escenario}_med{med_id:06d}_lambda_{wavelength:.2f}".replace(".", "p")
+        base_name = f"{escenario}_mr{escenario_mr}_med{med_id:06d}_lambda_{wavelength:.2f}".replace(".", "p")
     else:
-        base_name = f"{escenario}_lambda_{wavelength:.2f}".replace(".", "p")
+        base_name = f"{escenario}_mr{escenario_mr}_lambda_{wavelength:.2f}".replace(".", "p")
     rxt_output_path = per_lambda_dir / f"{base_name}.rxt"
 
     construir_rxt_una_lambda(
@@ -799,6 +880,7 @@ def _correr_iad_una_lambda(
 
     fila = {
         "escenario": escenario,
+        "escenario_mr": escenario_mr,
         "factor_musp": factor_aplicado,
         "lambda_nm": wavelength,
         "reflectance_input": reflectance,
@@ -939,10 +1021,20 @@ def procesar_sujeto_single(
 
     df_mr = leer_csv_mr(csv_path)
 
+    # Validar backward compatibility: si reflectance_std es todo ceros y se piden variaciones
+    if (df_mr["reflectance_std"] == 0).all() and ESCENARIOS_MR_STD != ("nominal",):
+        raise ValueError(
+            "ESCENARIOS_MR_STD pide variaciones ±1σ pero reflectance_std es 0 en todo el CSV. "
+            "Regenera M_R_data.csv con single_adq.py actualizado, "
+            "o usa ESCENARIOS_MR_STD = ('nominal',)."
+        )
+
     resultados = []
     tareas = [
-        (idx, escenario, float(row["wavelength_nm"]), float(row["reflectance"]))
-        for escenario in ESCENARIOS_MUSP
+        (idx, escenario, escenario_mr,
+         float(row["wavelength_nm"]), float(row["reflectance"]), float(row["reflectance_std"]))
+        for escenario    in ESCENARIOS_MUSP
+        for escenario_mr in ESCENARIOS_MR_STD
         for idx, (_, row) in enumerate(df_mr.iterrows(), 1)
     ]
     total = len(tareas)
@@ -950,10 +1042,12 @@ def procesar_sujeto_single(
 
     print(
         f"  Mediciones: {len(df_mr)}  |  "
+        f"Escenarios μs': {len(ESCENARIOS_MUSP)}  |  "
+        f"Escenarios M_R: {len(ESCENARIOS_MR_STD)}  |  "
         f"Tareas IAD: {total}  |  Workers: {WORKERS}"
     )
 
-    def _tarea(task_id, escenario, wavelength, reflectance):
+    def _tarea(task_id, escenario, escenario_mr, wavelength, reflectance, reflectance_std):
         return _correr_iad_una_lambda(
             wavelength,
             reflectance,
@@ -962,6 +1056,8 @@ def procesar_sujeto_single(
             IAD_EXE_PATH,
             escenario=escenario,
             task_id=task_id,
+            escenario_mr=escenario_mr,
+            reflectance_std=reflectance_std,
         )
 
     if WORKERS <= 1:
@@ -977,7 +1073,7 @@ def procesar_sujeto_single(
                 completadas += 1
                 _progreso(completadas, total, t_inicio)
 
-    df_resultados = pd.DataFrame(resultados).sort_values(["escenario", "lambda_nm"])
+    df_resultados = pd.DataFrame(resultados).sort_values(["escenario", "escenario_mr", "lambda_nm"])
     ruta_resumen = output_dir / "resumen_resultados_phan_sierra.csv"
     df_resultados.to_csv(ruta_resumen, index=False)
 
@@ -1027,7 +1123,7 @@ def procesar_sujeto_temporal(
 
     tareas = [
         (escenario, med_id, mediciones[med_id]["tiempo"], float(wl), float(ref))
-        for escenario in ("nominal",)
+        for escenario in ESCENARIOS_MUSP
         for med_id in ids_medicion
         for wl, ref in mediciones[med_id]["espectro"]
     ]
@@ -1124,6 +1220,7 @@ def main():
     print(f"[Phan-Sierra] B = {PHAN_SIERRA_B:.8f}")
     print(f"[Phan-Sierra] lambda_ref = {PHAN_SIERRA_LAMBDA_REF_NM:.1f} nm")
     print(f"[Phan-Sierra] extrapolacion permitida = {PHAN_SIERRA_ALLOW_EXTRAPOLATION}")
+    print(f"[Phan-Sierra] extrapolacion sd permitida = {PHAN_MUSP_SD_ALLOW_EXTRAPOLATION}")
     print(f"[Phan-Sierra] escenarios = {', '.join(ESCENARIOS_MUSP)}")
 
     ruta_tabla_phan_sierra = iad_dir / "tabla_phan_sierra.csv"

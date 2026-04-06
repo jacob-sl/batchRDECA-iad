@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py -)",
+      "Bash(py -m py_compile \"c:\\\\Users\\\\ttjac\\\\OneDrive\\\\Documentos\\\\VSCODE\\\\ProyectoCIO\\\\EmpaquetadoIADFull\\\\single_adq.py\")"
+    ]
+  }
+}

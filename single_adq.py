@@ -48,9 +48,13 @@ FRECUENCIA_CORTE_BUTTER = 0.1  # Frecuencia de corte normalizada (0-1, Nyquist=1
 ORDEN_FILTRO_BUTTER = 6         # Orden del filtro Butterworth
 
 # ========== RANGO DE LONGITUDES DE ONDA (TRUNCADO) ==========
-LAMBDA_MIN = 400  # Longitud de onda mínima en nm
-LAMBDA_MAX = 700  # Longitud de onda máxima en nm
-muestras_objetivo = 300  # Número de muestras deseadas después del diezmado
+LAMBDA_MIN = 420  # Longitud de onda mínima en nm
+LAMBDA_MAX = 682  # Longitud de onda máxima en nm
+muestras_objetivo = 500  # Número de muestras deseadas después del diezmado
+
+# ========== RANGO DEL EJE Y EN GRÁFICAS DE REFLECTANCIA =====
+PLOT_MR_YMIN = 0.0   # Reflectancia mínima en el eje Y
+PLOT_MR_YMAX = 0.31  # Reflectancia máxima en el eje Y
 # ============================================================
 print(f"Configuración:")
 print(f"  - Tiempo de integración: {TIEMPO_INTEGRACION_INICIAL*1000} ms")
@@ -369,10 +373,9 @@ def crear_carpeta_sujeto(base_dir):
             break
         siguiente_id += 1
 
-    ruta_series = os.path.join(ruta_sujeto, "series")
-    os.makedirs(ruta_series, exist_ok=False)
+    os.makedirs(ruta_sujeto)
 
-    return ruta_sujeto, ruta_series, siguiente_id
+    return ruta_sujeto, siguiente_id
 
 def solicitar_dato_sujeto(prompt, default="No especificado"):
     valor = input(prompt).strip()
@@ -496,9 +499,10 @@ print(f"Rango: {wavelengths[0]:.2f} nm - {wavelengths[-1]:.2f} nm")
 directorio_raiz = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Mediciones")
 directorio_calibraciones = os.path.join(directorio_raiz, "calibraciones")
 ruta_calibracion_npz, ruta_calibracion_meta = rutas_calibracion(directorio_calibraciones)
-ruta_sujeto, ruta_series, sujeto_id = crear_carpeta_sujeto(directorio_raiz)
+ruta_sujeto, sujeto_id = crear_carpeta_sujeto(directorio_raiz)
 
-print("\nRegistro de nuevo sujeto")
+print()
+print("Registro de nuevo sujeto")
 nombre_sujeto = solicitar_dato_sujeto("Nombre del sujeto: ")
 edad_sujeto = solicitar_dato_sujeto("Edad del sujeto (años): ")
 municipio_nacimiento_sujeto = solicitar_dato_sujeto("Municipio de nacimiento: ")
@@ -522,283 +526,319 @@ with open(ruta_salida_iad, "w", encoding="utf-8") as f:
 print(f"Sujeto registrado en: {ruta_sujeto}")
 print(f"  - TXT de sujeto: {ruta_datos_sujeto}")
 print(f"  - Salida IAD: {ruta_salida_iad}")
-print(f"  - Series: {ruta_series}")
-rutas_graficas = []
 
-# Gestión de calibración persistente (R_0, R_1)
-usar_calibracion_guardada = False
-calibracion = cargar_calibracion(ruta_calibracion_npz, ruta_calibracion_meta)
-
-if calibracion is not None:
-    metadata_cal = calibracion["metadata"]
-    compatible = calibracion_es_compatible(
-        calibracion["wavelengths"],
-        wavelengths,
-        calibracion["R_0"],
-        calibracion["R_1"]
-    )
-
-    if compatible:
-        fecha_cal = metadata_cal.get("fecha_calibracion", "")
-        tiempo_cal = float(metadata_cal.get("tiempo_integracion_s", TIEMPO_INTEGRACION_INICIAL))
-
-        print("\nCalibración encontrada en disco:")
-        print(f"  - Fecha: {fecha_cal if fecha_cal else 'desconocida'}")
-        print(f"  - Tiempo integración guardado: {tiempo_cal*1000:.2f} ms")
-        print("  - Uso recomendado: reutilizar R_0/R_1 entre sujetos y recalibrar solo ante cambios de sistema o montaje.")
-
-        forzar_recalibracion = confirmar_simple(
-            "¿Hubo cambios en sistema o montaje que requieran nueva calibración (R_0/R_1)?",
-            default=False
+while True:
+    # Solicitar ubicación anatómica en cada medición
+    print()
+    print(f"Sujeto: {nombre_sujeto} (ID: {sujeto_id:03d})")
+    ubicacion_anatomica = solicitar_dato_sujeto("Ubicación anatómica (ej: antebrazo_izquierdo): ")
+    ruta_series = os.path.join(ruta_sujeto, ubicacion_anatomica)
+    os.makedirs(ruta_series, exist_ok=True)
+    print(f"  - Carpeta medición: {ruta_series}")
+    rutas_graficas = []
+    # Gestión de calibración persistente (R_0, R_1)
+    usar_calibracion_guardada = False
+    calibracion = cargar_calibracion(ruta_calibracion_npz, ruta_calibracion_meta)
+    
+    if calibracion is not None:
+        metadata_cal = calibracion["metadata"]
+        compatible = calibracion_es_compatible(
+            calibracion["wavelengths"],
+            wavelengths,
+            calibracion["R_0"],
+            calibracion["R_1"]
         )
-        usar_calibracion_guardada = not forzar_recalibracion
-        if usar_calibracion_guardada:
-            print("  - Se reutilizará la calibración guardada.")
+    
+        if compatible:
+            fecha_cal = metadata_cal.get("fecha_calibracion", "")
+            tiempo_cal = float(metadata_cal.get("tiempo_integracion_s", TIEMPO_INTEGRACION_INICIAL))
+    
+            print("\nCalibración encontrada en disco:")
+            print(f"  - Fecha: {fecha_cal if fecha_cal else 'desconocida'}")
+            print(f"  - Tiempo integración guardado: {tiempo_cal*1000:.2f} ms")
+            print("  - Uso recomendado: reutilizar R_0/R_1 entre sujetos y recalibrar solo ante cambios de sistema o montaje.")
+    
+            forzar_recalibracion = confirmar_simple(
+                "¿Hubo cambios en sistema o montaje que requieran nueva calibración (R_0/R_1)?",
+                default=False
+            )
+            usar_calibracion_guardada = not forzar_recalibracion
+            if usar_calibracion_guardada:
+                print("  - Se reutilizará la calibración guardada.")
+            else:
+                print("  - Se medirá una nueva calibración (R_0 y R_1).")
         else:
-            print("  - Se medirá una nueva calibración (R_0 y R_1).")
+            print("\n⚠ La calibración guardada no es compatible con la configuración actual.")
+            print("   Se medirá una calibración nueva (R_0 y R_1).")
     else:
-        print("\n⚠ La calibración guardada no es compatible con la configuración actual.")
-        print("   Se medirá una calibración nueva (R_0 y R_1).")
-else:
-    print("\nNo se encontró calibración guardada. Se medirá una calibración nueva (R_0 y R_1).")
-
-if usar_calibracion_guardada:
-    metadata_cal = calibracion["metadata"]
-    R_0 = calibracion["R_0"]
-    R_1 = calibracion["R_1"]
-    TIEMPO_INTEGRACION = float(metadata_cal.get("tiempo_integracion_s", TIEMPO_INTEGRACION_INICIAL))
-    intensidad_opt = tomar_medicion(spec, TIEMPO_INTEGRACION)
-    optimizacion_realizada = False
-
-    print("\n✓ Calibración cargada desde disco.")
-    print(f"  - Tiempo de integración usado: {TIEMPO_INTEGRACION*1000:.2f} ms")
-    print(f"  - R_0 cargado. Shape: {R_0.shape}")
-    print(f"  - R_1 cargado. Shape: {R_1.shape}")
-else:
-    # Confirmación por tecla para la optimización de tiempo de integración
-    if confirmar_por_tecla("¿Deseas ejecutar la optimización de tiempo de integración?", tecla="o"):
-        TIEMPO_INTEGRACION, intensidad_opt = optimizar_tiempo_integracion(
-            spec,
-            TIEMPO_INTEGRACION_INICIAL,
-            umbral_saturacion_absoluto=UMBRAL_SATURACION,  # Umbral fijo absoluto
-            factor_incremento=1.10,                         # Aumenta 10% en cada iteración
-            max_iteraciones=30
-        )
-        optimizacion_realizada = True
-    else:
-        TIEMPO_INTEGRACION = TIEMPO_INTEGRACION_INICIAL
+        print("\nNo se encontró calibración guardada. Se medirá una calibración nueva (R_0 y R_1).")
+    
+    if usar_calibracion_guardada:
+        metadata_cal = calibracion["metadata"]
+        R_0 = calibracion["R_0"]
+        R_1 = calibracion["R_1"]
+        TIEMPO_INTEGRACION = float(metadata_cal.get("tiempo_integracion_s", TIEMPO_INTEGRACION_INICIAL))
         intensidad_opt = tomar_medicion(spec, TIEMPO_INTEGRACION)
         optimizacion_realizada = False
-        print(f"\nOptimización omitida. Se usará el tiempo inicial: {TIEMPO_INTEGRACION*1000:.2f} ms")
-
-    # TOMA DE R_0
-    if not confirmar_simple("¿Iniciar serie R_0?"):
-        raise SystemExit("Proceso cancelado por el usuario antes de R_0.")
-
+    
+        print("\n✓ Calibración cargada desde disco.")
+        print(f"  - Tiempo de integración usado: {TIEMPO_INTEGRACION*1000:.2f} ms")
+        print(f"  - R_0 cargado. Shape: {R_0.shape}")
+        print(f"  - R_1 cargado. Shape: {R_1.shape}")
+    else:
+        # Confirmación por tecla para la optimización de tiempo de integración
+        if confirmar_por_tecla("¿Deseas ejecutar la optimización de tiempo de integración?", tecla="o"):
+            TIEMPO_INTEGRACION, intensidad_opt = optimizar_tiempo_integracion(
+                spec,
+                TIEMPO_INTEGRACION_INICIAL,
+                umbral_saturacion_absoluto=UMBRAL_SATURACION,  # Umbral fijo absoluto
+                factor_incremento=1.10,                         # Aumenta 10% en cada iteración
+                max_iteraciones=30
+            )
+            optimizacion_realizada = True
+        else:
+            TIEMPO_INTEGRACION = TIEMPO_INTEGRACION_INICIAL
+            intensidad_opt = tomar_medicion(spec, TIEMPO_INTEGRACION)
+            optimizacion_realizada = False
+            print(f"\nOptimización omitida. Se usará el tiempo inicial: {TIEMPO_INTEGRACION*1000:.2f} ms")
+    
+        # TOMA DE R_0
+        if not confirmar_simple("¿Iniciar serie R_0?"):
+            raise SystemExit("Proceso cancelado por el usuario antes de R_0.")
+    
+        print("=" * 50)
+        print("SERIE R_0")
+        print("=" * 50)
+    
+        R_0, scans_r0 = tomar_serie_adquisiciones(
+            spec,
+            TIEMPO_INTEGRACION,
+            NUM_MEDICIONES_PROMEDIO,
+            TIEMPO_ESPERA
+        )
+    
+        print(f"R_0 guardado. Shape: {R_0.shape}")
+        print(f"Rango de intensidades: {R_0.min():.6f} - {R_0.max():.6f}")
+        print(f"Tiempo de integración usado para R_0: {TIEMPO_INTEGRACION*1000:.2f} ms")
+        guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_0_trueraw_data.csv'), scans_r0, wavelengths)
+        print(f"  - R_0_trueraw_data.csv guardado.")
+    
+        # TOMA DE R_1
+        if not confirmar_simple("¿Iniciar serie R_1?"):
+            raise SystemExit("Proceso cancelado por el usuario antes de R_1.")
+    
+        print("=" * 50)
+        print("SERIE R_1")
+        print("=" * 50)
+    
+        R_1, scans_r1 = tomar_serie_adquisiciones(
+            spec,
+            TIEMPO_INTEGRACION,
+            NUM_MEDICIONES_PROMEDIO,
+            TIEMPO_ESPERA
+        )
+    
+        print(f"R_1 guardado. Shape: {R_1.shape}")
+        print(f"Rango de intensidades: {R_1.min():.6f} - {R_1.max():.6f}")
+        guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_1_trueraw_data.csv'), scans_r1, wavelengths)
+        print(f"  - R_1_trueraw_data.csv guardado.")
+    
+        meta_guardada = guardar_calibracion(
+            ruta_calibracion_npz,
+            ruta_calibracion_meta,
+            wavelengths,
+            R_0,
+            R_1,
+            TIEMPO_INTEGRACION,
+            NUM_MEDICIONES_PROMEDIO
+        )
+        print("\n✓ Calibración guardada en disco.")
+        print(f"  - Archivo datos: {ruta_calibracion_npz}")
+        print(f"  - Archivo metadata: {ruta_calibracion_meta}")
+        print(f"  - Fecha calibración: {meta_guardada['fecha_calibracion']}")
+    
+    # Copiar calibración usada a la carpeta del sujeto para trazabilidad
+    shutil.copy(ruta_calibracion_npz, os.path.join(ruta_series, 'calibracion_usada.npz'))
+    shutil.copy(ruta_calibracion_meta, os.path.join(ruta_series, 'calibracion_usada.json'))
+    print(f"\nCopia de calibración guardada en series/ para trazabilidad.")
+    
+    # Mostrar resultado solo si se realizó optimización
+    if optimizacion_realizada:
+        mask_rango_opt = (wavelengths >= LAMBDA_MIN) & (wavelengths <= LAMBDA_MAX)
+        wl_opt = wavelengths[mask_rango_opt]
+        int_opt = intensidad_opt[mask_rango_opt]
+    
+        print(f"\nEstadísticas de la medición de referencia ({LAMBDA_MIN}-{LAMBDA_MAX} nm):")
+        print(f"  - Intensidad máxima: {np.max(int_opt):.2f}")
+        print(f"  - Intensidad promedio: {np.mean(int_opt):.2f}")
+        print(f"  - Intensidad mínima: {np.min(int_opt):.2f}")
+        print(f"  - Mejora respecto al inicial: {(TIEMPO_INTEGRACION/TIEMPO_INTEGRACION_INICIAL):.2f}x")
+    
+        # Graficar el espectro optimizado (truncado al rango LAMBDA_MIN-LAMBDA_MAX)
+        fig_espectro = plt.figure(figsize=(10, 5))
+        plt.plot(wl_opt, int_opt, linewidth=1.5, color='blue')
+        plt.axhline(y=UMBRAL_SATURACION, color='red', linestyle='--', label=f'Umbral saturación: {UMBRAL_SATURACION:.0f} ({PORCENTAJE_SATURACION*100:.0f}%)')
+        plt.axhline(y=VALOR_MAXIMO_DETECTOR, color='orange', linestyle=':', alpha=0.5, label=f'Máximo detector: {VALOR_MAXIMO_DETECTOR}')
+        plt.xlabel('Longitud de onda (nm)')
+        plt.ylabel('Intensidad')
+        plt.title(f'Espectro con tiempo de integración MÁXIMO optimizado ({TIEMPO_INTEGRACION*1000:.2f} ms)')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        rutas_graficas.append(
+            guardar_y_mostrar_figura(fig_espectro, ruta_series, "espectro_tiempo_integracion")
+        )
+    
+    # TOMA DE R_M
+    if not confirmar_simple("¿Iniciar serie R_M?"):
+        raise SystemExit("Proceso cancelado por el usuario antes de R_M.")
+    
     print("=" * 50)
-    print("SERIE R_0")
+    print("SERIE R_M")
     print("=" * 50)
-
-    R_0, scans_r0 = tomar_serie_adquisiciones(
+    
+    R_M, scans_rm = tomar_serie_adquisiciones(
         spec,
         TIEMPO_INTEGRACION,
         NUM_MEDICIONES_PROMEDIO,
         TIEMPO_ESPERA
     )
-
-    print(f"R_0 guardado. Shape: {R_0.shape}")
-    print(f"Rango de intensidades: {R_0.min():.6f} - {R_0.max():.6f}")
-    print(f"Tiempo de integración usado para R_0: {TIEMPO_INTEGRACION*1000:.2f} ms")
-    guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_0_trueraw_data.csv'), scans_r0, wavelengths)
-    print(f"  - R_0_trueraw_data.csv guardado.")
-
-    # TOMA DE R_1
-    if not confirmar_simple("¿Iniciar serie R_1?"):
-        raise SystemExit("Proceso cancelado por el usuario antes de R_1.")
-
+    
+    print(f"R_M guardado. Shape: {R_M.shape}")
+    print(f"Rango de intensidades: {R_M.min():.6f} - {R_M.max():.6f}")
+    guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_M_trueraw_data.csv'), scans_rm, wavelengths)
+    print(f"  - R_M_trueraw_data.csv guardado.")
+    
+    # ========== PROCESAMIENTO DE SEÑAL ==========
+    # 1. Truncar al rango de interés
+    wl_trunc, R_0_trunc = truncar_a_rango(R_0)
+    _, R_1_trunc = truncar_a_rango(R_1)
+    _, R_M_trunc = truncar_a_rango(R_M)
+    
+    # 2. Aplicar filtro Butterworth ANTES de calcular reflectancia
+    R_0_butter = aplicar_butterworth(R_0_trunc)
+    R_1_butter = aplicar_butterworth(R_1_trunc)
+    R_M_butter = aplicar_butterworth(R_M_trunc)
+    
+    print(f"Butterworth aplicado (orden={ORDEN_FILTRO_BUTTER}, fc={FRECUENCIA_CORTE_BUTTER})")
+    
+    # 3. Cálculo de Reflectancia Medida (M_R)
+    # Fórmula: M_R = R_std * (R_M - R_0) / (R_1 - R_0)
+    R_STD = 0.99  # Reflectancia del estándar
+    
+    numerador = R_M_butter - R_0_butter
+    denominador = R_1_butter - R_0_butter
+    
+    # Evitar división por cero
+    denominador = np.where(denominador == 0, np.nan, denominador)
+    
+    M_R_values = R_STD * (numerador / denominador)
+    
+    # ========== SD DE M_R POR SCAN (PROPAGACIÓN DE INCERTIDUMBRE) ==========
+    _MR_por_scan = []
+    for _scan in scans_rm:
+        _, _scan_trunc = truncar_a_rango(_scan)
+        _scan_butter   = aplicar_butterworth(_scan_trunc)
+        _mr_i = R_STD * (_scan_butter - R_0_butter) / denominador
+        _MR_por_scan.append(_mr_i)
+    M_R_std_values = np.std(np.array(_MR_por_scan), axis=0, ddof=1)
+    print(f"σ_M_R calculada sobre {len(_MR_por_scan)} scans. Media de SD: {np.nanmean(M_R_std_values):.5f}")
+    
+    # Crear DataFrames
+    df_R0 = pd.DataFrame({'wavelength_nm': wl_trunc, 'intensity': R_0_butter})
+    df_R1 = pd.DataFrame({'wavelength_nm': wl_trunc, 'intensity': R_1_butter})
+    df_RM = pd.DataFrame({'wavelength_nm': wl_trunc, 'intensity': R_M_butter})
+    df_MR = pd.DataFrame({
+        'wavelength_nm':   wl_trunc,
+        'reflectance':     M_R_values,
+        'reflectance_std': M_R_std_values,
+    })
+    
+    # Mostrar estadísticas
     print("=" * 50)
-    print("SERIE R_1")
+    print("REFLECTANCIA MEDIDA (M_R)")
     print("=" * 50)
-
-    R_1, scans_r1 = tomar_serie_adquisiciones(
-        spec,
-        TIEMPO_INTEGRACION,
-        NUM_MEDICIONES_PROMEDIO,
-        TIEMPO_ESPERA
-    )
-
-    print(f"R_1 guardado. Shape: {R_1.shape}")
-    print(f"Rango de intensidades: {R_1.min():.6f} - {R_1.max():.6f}")
-    guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_1_trueraw_data.csv'), scans_r1, wavelengths)
-    print(f"  - R_1_trueraw_data.csv guardado.")
-
-    meta_guardada = guardar_calibracion(
-        ruta_calibracion_npz,
-        ruta_calibracion_meta,
-        wavelengths,
-        R_0,
-        R_1,
-        TIEMPO_INTEGRACION,
-        NUM_MEDICIONES_PROMEDIO
-    )
-    print("\n✓ Calibración guardada en disco.")
-    print(f"  - Archivo datos: {ruta_calibracion_npz}")
-    print(f"  - Archivo metadata: {ruta_calibracion_meta}")
-    print(f"  - Fecha calibración: {meta_guardada['fecha_calibracion']}")
-
-# Copiar calibración usada a la carpeta del sujeto para trazabilidad
-shutil.copy(ruta_calibracion_npz, os.path.join(ruta_series, 'calibracion_usada.npz'))
-shutil.copy(ruta_calibracion_meta, os.path.join(ruta_series, 'calibracion_usada.json'))
-print(f"\nCopia de calibración guardada en series/ para trazabilidad.")
-
-# Mostrar resultado solo si se realizó optimización
-if optimizacion_realizada:
-    mask_rango_opt = (wavelengths >= LAMBDA_MIN) & (wavelengths <= LAMBDA_MAX)
-    wl_opt = wavelengths[mask_rango_opt]
-    int_opt = intensidad_opt[mask_rango_opt]
-
-    print(f"\nEstadísticas de la medición de referencia ({LAMBDA_MIN}-{LAMBDA_MAX} nm):")
-    print(f"  - Intensidad máxima: {np.max(int_opt):.2f}")
-    print(f"  - Intensidad promedio: {np.mean(int_opt):.2f}")
-    print(f"  - Intensidad mínima: {np.min(int_opt):.2f}")
-    print(f"  - Mejora respecto al inicial: {(TIEMPO_INTEGRACION/TIEMPO_INTEGRACION_INICIAL):.2f}x")
-
-    # Graficar el espectro optimizado (truncado al rango LAMBDA_MIN-LAMBDA_MAX)
-    fig_espectro = plt.figure(figsize=(10, 5))
-    plt.plot(wl_opt, int_opt, linewidth=1.5, color='blue')
-    plt.axhline(y=UMBRAL_SATURACION, color='red', linestyle='--', label=f'Umbral saturación: {UMBRAL_SATURACION:.0f} ({PORCENTAJE_SATURACION*100:.0f}%)')
-    plt.axhline(y=VALOR_MAXIMO_DETECTOR, color='orange', linestyle=':', alpha=0.5, label=f'Máximo detector: {VALOR_MAXIMO_DETECTOR}')
+    print(f"Reflectancia del estándar: {R_STD}")
+    print(f"Rango de longitudes de onda: {df_MR['wavelength_nm'].min():.2f} - {df_MR['wavelength_nm'].max():.2f} nm")
+    print(f"Reflectancia mínima: {np.nanmin(M_R_values):.4f}")
+    print(f"Reflectancia máxima: {np.nanmax(M_R_values):.4f}")
+    print(f"Reflectancia promedio: {np.nanmean(M_R_values):.4f}")
+    print(df_MR.head())
+    
+    # Graficar la reflectancia medida (solo M_R)
+    fig_mr = plt.figure(figsize=(12, 6))
+    plt.fill_between(df_MR['wavelength_nm'],
+                     df_MR['reflectance'] - df_MR['reflectance_std'],
+                     df_MR['reflectance'] + df_MR['reflectance_std'],
+                     alpha=0.3, color='green', label=f'±1σ medición (media σ={np.nanmean(M_R_std_values):.4f})')
+    plt.plot(df_MR['wavelength_nm'], df_MR['reflectance'], linewidth=1.5, color='green', label='Reflectancia Medida (M_R)')
     plt.xlabel('Longitud de onda (nm)')
-    plt.ylabel('Intensidad')
-    plt.title(f'Espectro con tiempo de integración MÁXIMO optimizado ({TIEMPO_INTEGRACION*1000:.2f} ms)')
-    plt.legend()
+    plt.ylabel('Reflectancia')
+    plt.xlim(LAMBDA_MIN, LAMBDA_MAX)
+    plt.ylim(PLOT_MR_YMIN, PLOT_MR_YMAX)
     plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.title('Reflectancia Medida del Tejido (M_R)')
     plt.tight_layout()
     rutas_graficas.append(
-        guardar_y_mostrar_figura(fig_espectro, ruta_series, "espectro_tiempo_integracion")
+        guardar_y_mostrar_figura(fig_mr, ruta_series, "reflectancia_medida")
     )
+    
+    # 4. Diezmado para reducir puntos (para IAD)
+    # El Butterworth ya actúa como filtro anti-aliasing para el factor de diezmado usado
+    factor_diezmado = max(1, len(wl_trunc) // muestras_objetivo)
+    
+    df_R0_diezmado = df_R0.iloc[::factor_diezmado].reset_index(drop=True)
+    df_R1_diezmado = df_R1.iloc[::factor_diezmado].reset_index(drop=True)
+    df_RM_diezmado = df_RM.iloc[::factor_diezmado].reset_index(drop=True)
+    df_MR_diezmado = df_MR.iloc[::factor_diezmado].reset_index(drop=True)
+    
+    print(f"\nDiezmado aplicado con factor = {factor_diezmado}")
+    print(f"Puntos originales: {len(wl_trunc)} -> Puntos finales: {len(df_R0_diezmado)}")
+    
+    # 5. Exportación de datos
+    df_R0_diezmado.to_csv(os.path.join(ruta_series, 'R_0_data.csv'), index=False)
+    df_R1_diezmado.to_csv(os.path.join(ruta_series, 'R_1_data.csv'), index=False)
+    df_RM_diezmado.to_csv(os.path.join(ruta_series, 'R_M_data.csv'), index=False)
+    df_MR_diezmado.to_csv(os.path.join(ruta_series, 'M_R_data.csv'), index=False)
+    
+    # Copia en directorio raíz (sin ID de sujeto)
+    directorio_script = os.path.dirname(os.path.abspath(__file__))
+    df_MR_diezmado.to_csv(os.path.join(directorio_script, 'M_R_data.csv'), index=False)
+    print(f"Copia M_R guardada en directorio raíz: {os.path.join(directorio_script, 'M_R_data.csv')}")
+    
+    print(f"\nDatos guardados en: {ruta_sujeto}")
+    print(f"  - TXT de sujeto: {ruta_datos_sujeto}")
+    print(f"  - Salida IAD: {ruta_salida_iad}")
+    print(f"  - Series: {ruta_series}")
+    
+    # Graficar M_R diezmado
+    fig_mr_diezmado = plt.figure(figsize=(12, 6))
+    plt.fill_between(df_MR_diezmado['wavelength_nm'],
+                     df_MR_diezmado['reflectance'] - df_MR_diezmado['reflectance_std'],
+                     df_MR_diezmado['reflectance'] + df_MR_diezmado['reflectance_std'],
+                     alpha=0.3, color='green', label=f'±1σ medición (media σ={np.nanmean(df_MR_diezmado["reflectance_std"]):.4f})')
+    plt.plot(df_MR_diezmado['wavelength_nm'], df_MR_diezmado['reflectance'], linewidth=1.5, color='green', label='M_R diezmado', marker='o', markersize=3)
+    plt.xlabel('Longitud de onda (nm)')
+    plt.ylabel('Reflectancia')
+    plt.xlim(LAMBDA_MIN, LAMBDA_MAX)
+    plt.ylim(PLOT_MR_YMIN, PLOT_MR_YMAX)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.title(f'Reflectancia Medida diezmada ({len(df_MR_diezmado)} puntos)')
+    plt.tight_layout()
+    rutas_graficas.append(
+        guardar_y_mostrar_figura(fig_mr_diezmado, ruta_series, "MR_diezmado")
+    )
+    
+    print("  - Gráficas guardadas:")
+    for ruta_grafica in rutas_graficas:
+        print(f"    * {ruta_grafica}")
+    
 
-# TOMA DE R_M
-if not confirmar_simple("¿Iniciar serie R_M?"):
-    raise SystemExit("Proceso cancelado por el usuario antes de R_M.")
-
-print("=" * 50)
-print("SERIE R_M")
-print("=" * 50)
-
-R_M, scans_rm = tomar_serie_adquisiciones(
-    spec,
-    TIEMPO_INTEGRACION,
-    NUM_MEDICIONES_PROMEDIO,
-    TIEMPO_ESPERA
-)
-
-print(f"R_M guardado. Shape: {R_M.shape}")
-print(f"Rango de intensidades: {R_M.min():.6f} - {R_M.max():.6f}")
-guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_M_trueraw_data.csv'), scans_rm, wavelengths)
-print(f"  - R_M_trueraw_data.csv guardado.")
-
-# ========== PROCESAMIENTO DE SEÑAL ==========
-# 1. Truncar al rango de interés
-wl_trunc, R_0_trunc = truncar_a_rango(R_0)
-_, R_1_trunc = truncar_a_rango(R_1)
-_, R_M_trunc = truncar_a_rango(R_M)
-
-# 2. Aplicar filtro Butterworth ANTES de calcular reflectancia
-R_0_butter = aplicar_butterworth(R_0_trunc)
-R_1_butter = aplicar_butterworth(R_1_trunc)
-R_M_butter = aplicar_butterworth(R_M_trunc)
-
-print(f"Butterworth aplicado (orden={ORDEN_FILTRO_BUTTER}, fc={FRECUENCIA_CORTE_BUTTER})")
-
-# 3. Cálculo de Reflectancia Medida (M_R)
-# Fórmula: M_R = R_std * (R_M - R_0) / (R_1 - R_0)
-R_STD = 0.99  # Reflectancia del estándar
-
-numerador = R_M_butter - R_0_butter
-denominador = R_1_butter - R_0_butter
-
-# Evitar división por cero
-denominador = np.where(denominador == 0, np.nan, denominador)
-
-M_R_values = R_STD * (numerador / denominador)
-
-# Crear DataFrames
-df_R0 = pd.DataFrame({'wavelength_nm': wl_trunc, 'intensity': R_0_butter})
-df_R1 = pd.DataFrame({'wavelength_nm': wl_trunc, 'intensity': R_1_butter})
-df_RM = pd.DataFrame({'wavelength_nm': wl_trunc, 'intensity': R_M_butter})
-df_MR = pd.DataFrame({'wavelength_nm': wl_trunc, 'reflectance': M_R_values})
-
-# Mostrar estadísticas
-print("=" * 50)
-print("REFLECTANCIA MEDIDA (M_R)")
-print("=" * 50)
-print(f"Reflectancia del estándar: {R_STD}")
-print(f"Rango de longitudes de onda: {df_MR['wavelength_nm'].min():.2f} - {df_MR['wavelength_nm'].max():.2f} nm")
-print(f"Reflectancia mínima: {np.nanmin(M_R_values):.4f}")
-print(f"Reflectancia máxima: {np.nanmax(M_R_values):.4f}")
-print(f"Reflectancia promedio: {np.nanmean(M_R_values):.4f}")
-print(df_MR.head())
-
-# Graficar la reflectancia medida (solo M_R)
-fig_mr = plt.figure(figsize=(12, 6))
-plt.plot(df_MR['wavelength_nm'], df_MR['reflectance'], linewidth=1.5, color='green', label='Reflectancia Medida (M_R)')
-plt.xlabel('Longitud de onda (nm)')
-plt.ylabel('Reflectancia')
-plt.ylim(0.05, 0.3)
-plt.grid(True, alpha=0.3)
-plt.legend()
-plt.title('Reflectancia Medida del Tejido (M_R)')
-plt.tight_layout()
-rutas_graficas.append(
-    guardar_y_mostrar_figura(fig_mr, ruta_series, "reflectancia_medida")
-)
-
-# 4. Diezmado para reducir puntos (para IAD)
-# El Butterworth ya actúa como filtro anti-aliasing para el factor de diezmado usado
-factor_diezmado = max(1, len(wl_trunc) // muestras_objetivo)
-
-df_R0_diezmado = df_R0.iloc[::factor_diezmado].reset_index(drop=True)
-df_R1_diezmado = df_R1.iloc[::factor_diezmado].reset_index(drop=True)
-df_RM_diezmado = df_RM.iloc[::factor_diezmado].reset_index(drop=True)
-df_MR_diezmado = df_MR.iloc[::factor_diezmado].reset_index(drop=True)
-
-print(f"\nDiezmado aplicado con factor = {factor_diezmado}")
-print(f"Puntos originales: {len(wl_trunc)} -> Puntos finales: {len(df_R0_diezmado)}")
-
-# 5. Exportación de datos
-df_R0_diezmado.to_csv(os.path.join(ruta_series, 'R_0_data.csv'), index=False)
-df_R1_diezmado.to_csv(os.path.join(ruta_series, 'R_1_data.csv'), index=False)
-df_RM_diezmado.to_csv(os.path.join(ruta_series, 'R_M_data.csv'), index=False)
-df_MR_diezmado.to_csv(os.path.join(ruta_series, 'M_R_data.csv'), index=False)
-
-# Copia en directorio raíz (sin ID de sujeto)
-directorio_script = os.path.dirname(os.path.abspath(__file__))
-df_MR_diezmado.to_csv(os.path.join(directorio_script, 'M_R_data.csv'), index=False)
-print(f"Copia M_R guardada en directorio raíz: {os.path.join(directorio_script, 'M_R_data.csv')}")
-
-print(f"\nDatos guardados en: {ruta_sujeto}")
-print(f"  - TXT de sujeto: {ruta_datos_sujeto}")
-print(f"  - Salida IAD: {ruta_salida_iad}")
-print(f"  - Series: {ruta_series}")
-
-# Graficar M_R diezmado
-fig_mr_diezmado = plt.figure(figsize=(12, 6))
-plt.plot(df_MR_diezmado['wavelength_nm'], df_MR_diezmado['reflectance'], linewidth=1.5, color='green', label='M_R diezmado', marker='o', markersize=3)
-plt.xlabel('Longitud de onda (nm)')
-plt.ylabel('Reflectancia')
-plt.ylim(0.05, 0.3)
-plt.grid(True, alpha=0.3)
-plt.legend()
-plt.title(f'Reflectancia Medida diezmada ({len(df_MR_diezmado)} puntos)')
-plt.tight_layout()
-rutas_graficas.append(
-    guardar_y_mostrar_figura(fig_mr_diezmado, ruta_series, "MR_diezmado")
-)
-
-print("  - Gráficas guardadas:")
-for ruta_grafica in rutas_graficas:
-    print(f"    * {ruta_grafica}")
+    # Preguntar si se desea realizar otra medición
+    if not confirmar_simple("¿Deseas realizar otra medición?"):
+        break
 
 # Desconexión (atexit maneja el caso de error/excepción)
 atexit.unregister(_cleanup_spec)
