@@ -3,7 +3,8 @@
 IAD_run/
 IADSCOTT/
 Mediciones/
-
+AGENTS.md
+.claude/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

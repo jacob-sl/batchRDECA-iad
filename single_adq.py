@@ -55,6 +55,39 @@ muestras_objetivo = 500  # Número de muestras deseadas después del diezmado
 # ========== RANGO DEL EJE Y EN GRÁFICAS DE REFLECTANCIA =====
 PLOT_MR_YMIN = 0.0   # Reflectancia mínima en el eje Y
 PLOT_MR_YMAX = 0.31  # Reflectancia máxima en el eje Y
+
+# Protocolo fijo de medicion anatomica para el modo single.
+# El identificador controla la carpeta y el mapeo fisico que usara batch_IAD.
+PROTOCOLO_ANATOMICO = [
+    {
+        "region_id": "pulgar_izquierdo",
+        "region_label": "Pulgar izquierdo",
+        "prompt_colocacion": "Coloque el pulgar izquierdo sobre el puerto.",
+        "phan_ubicacion": "Palm",
+        "decision_experimental": "Se usa Palm porque el pulgar medido corresponde a piel glabra.",
+    },
+    {
+        "region_id": "palma",
+        "region_label": "Palma",
+        "prompt_colocacion": "Coloque la palma sobre el puerto.",
+        "phan_ubicacion": "Palm",
+        "decision_experimental": "Mapeo directo a Palm.",
+    },
+    {
+        "region_id": "antebrazo_dorsal",
+        "region_label": "Antebrazo dorsal",
+        "prompt_colocacion": "Coloque el antebrazo dorsal sobre el puerto.",
+        "phan_ubicacion": "Dorsal Forearm",
+        "decision_experimental": "Mapeo directo a Dorsal Forearm.",
+    },
+    {
+        "region_id": "antebrazo_ventral",
+        "region_label": "Antebrazo ventral",
+        "prompt_colocacion": "Coloque el antebrazo ventral sobre el puerto.",
+        "phan_ubicacion": "Ventral Forearm",
+        "decision_experimental": "Mapeo directo a Ventral Forearm.",
+    },
+]
 # ============================================================
 print(f"Configuración:")
 print(f"  - Tiempo de integración: {TIEMPO_INTEGRACION_INICIAL*1000} ms")
@@ -424,6 +457,25 @@ def guardar_datos_sujeto(ruta_sujeto, sujeto_id, nombre, edad, municipio_nacimie
 
     return ruta_txt
 
+def guardar_metadata_region(ruta_series, sujeto_id, region):
+    ruta_json = os.path.join(ruta_series, "metadata_medicion.json")
+    metadata = {
+        "sujeto_id": f"{sujeto_id:03d}",
+        "fecha_medicion": datetime.now().isoformat(timespec="seconds"),
+        "region_id": region["region_id"],
+        "region_label": region["region_label"],
+        "phan_ubicacion": region["phan_ubicacion"],
+        "decision_experimental": region["decision_experimental"],
+        "lambda_min_nm": float(LAMBDA_MIN),
+        "lambda_max_nm": float(LAMBDA_MAX),
+        "num_mediciones_promedio": int(NUM_MEDICIONES_PROMEDIO),
+    }
+
+    with open(ruta_json, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+    return ruta_json
+
 def rutas_calibracion(directorio_calibraciones):
     ruta_npz = os.path.join(directorio_calibraciones, "calibracion_actual.npz")
     ruta_meta = os.path.join(directorio_calibraciones, "calibracion_actual.json")
@@ -495,51 +547,23 @@ wavelengths = np.asarray(list(wvdata))
 print(f"Longitudes de onda obtenidas: {len(wavelengths)} puntos")
 print(f"Rango: {wavelengths[0]:.2f} nm - {wavelengths[-1]:.2f} nm")
 
-# Registro de sujeto antes de realizar cualquier medición
 directorio_raiz = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Mediciones")
 directorio_calibraciones = os.path.join(directorio_raiz, "calibraciones")
 ruta_calibracion_npz, ruta_calibracion_meta = rutas_calibracion(directorio_calibraciones)
-ruta_sujeto, sujeto_id = crear_carpeta_sujeto(directorio_raiz)
 
-print()
-print("Registro de nuevo sujeto")
-nombre_sujeto = solicitar_dato_sujeto("Nombre del sujeto: ")
-edad_sujeto = solicitar_dato_sujeto("Edad del sujeto (años): ")
-municipio_nacimiento_sujeto = solicitar_dato_sujeto("Municipio de nacimiento: ")
-fitzpatrick_sujeto = solicitar_dato_sujeto("Fototipo Fitzpatrick (I-VI): ")
-afecciones_sujeto = solicitar_dato_sujeto("Afecciones conocidas: ")
+def preparar_calibracion_sesion(directorio_calibraciones, ruta_calibracion_npz, ruta_calibracion_meta):
+    """
+    Decide y obtiene R_0/R_1 una sola vez por sesion.
 
-ruta_datos_sujeto = guardar_datos_sujeto(
-    ruta_sujeto=ruta_sujeto,
-    sujeto_id=sujeto_id,
-    nombre=nombre_sujeto,
-    edad=edad_sujeto,
-    municipio_nacimiento=municipio_nacimiento_sujeto,
-    fitzpatrick=fitzpatrick_sujeto,
-    afecciones=afecciones_sujeto
-)
+    La calibracion se reutiliza para todos los sujetos medidos durante la
+    sesion mientras no cambien el sistema o el montaje.
+    """
+    global TIEMPO_INTEGRACION
 
-ruta_salida_iad = os.path.join(ruta_sujeto, "IAD_salida.txt")
-with open(ruta_salida_iad, "w", encoding="utf-8") as f:
-    f.write("Salida del IAD pendiente de generar.\n")
-
-print(f"Sujeto registrado en: {ruta_sujeto}")
-print(f"  - TXT de sujeto: {ruta_datos_sujeto}")
-print(f"  - Salida IAD: {ruta_salida_iad}")
-
-while True:
-    # Solicitar ubicación anatómica en cada medición
-    print()
-    print(f"Sujeto: {nombre_sujeto} (ID: {sujeto_id:03d})")
-    ubicacion_anatomica = solicitar_dato_sujeto("Ubicación anatómica (ej: antebrazo_izquierdo): ")
-    ruta_series = os.path.join(ruta_sujeto, ubicacion_anatomica)
-    os.makedirs(ruta_series, exist_ok=True)
-    print(f"  - Carpeta medición: {ruta_series}")
-    rutas_graficas = []
-    # Gestión de calibración persistente (R_0, R_1)
+    os.makedirs(directorio_calibraciones, exist_ok=True)
     usar_calibracion_guardada = False
     calibracion = cargar_calibracion(ruta_calibracion_npz, ruta_calibracion_meta)
-    
+
     if calibracion is not None:
         metadata_cal = calibracion["metadata"]
         compatible = calibracion_es_compatible(
@@ -572,7 +596,7 @@ while True:
             print("   Se medirá una calibración nueva (R_0 y R_1).")
     else:
         print("\nNo se encontró calibración guardada. Se medirá una calibración nueva (R_0 y R_1).")
-    
+
     if usar_calibracion_guardada:
         metadata_cal = calibracion["metadata"]
         R_0 = calibracion["R_0"]
@@ -620,8 +644,8 @@ while True:
         print(f"R_0 guardado. Shape: {R_0.shape}")
         print(f"Rango de intensidades: {R_0.min():.6f} - {R_0.max():.6f}")
         print(f"Tiempo de integración usado para R_0: {TIEMPO_INTEGRACION*1000:.2f} ms")
-        guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_0_trueraw_data.csv'), scans_r0, wavelengths)
-        print(f"  - R_0_trueraw_data.csv guardado.")
+        guardar_trueraw_estatico_csv(os.path.join(directorio_calibraciones, 'R_0_trueraw_data.csv'), scans_r0, wavelengths)
+        print(f"  - R_0_trueraw_data.csv guardado en calibraciones.")
     
         # TOMA DE R_1
         if not confirmar_simple("¿Iniciar serie R_1?"):
@@ -640,10 +664,10 @@ while True:
     
         print(f"R_1 guardado. Shape: {R_1.shape}")
         print(f"Rango de intensidades: {R_1.min():.6f} - {R_1.max():.6f}")
-        guardar_trueraw_estatico_csv(os.path.join(ruta_series, 'R_1_trueraw_data.csv'), scans_r1, wavelengths)
-        print(f"  - R_1_trueraw_data.csv guardado.")
+        guardar_trueraw_estatico_csv(os.path.join(directorio_calibraciones, 'R_1_trueraw_data.csv'), scans_r1, wavelengths)
+        print(f"  - R_1_trueraw_data.csv guardado en calibraciones.")
     
-        meta_guardada = guardar_calibracion(
+        metadata_cal = guardar_calibracion(
             ruta_calibracion_npz,
             ruta_calibracion_meta,
             wavelengths,
@@ -655,13 +679,8 @@ while True:
         print("\n✓ Calibración guardada en disco.")
         print(f"  - Archivo datos: {ruta_calibracion_npz}")
         print(f"  - Archivo metadata: {ruta_calibracion_meta}")
-        print(f"  - Fecha calibración: {meta_guardada['fecha_calibracion']}")
-    
-    # Copiar calibración usada a la carpeta del sujeto para trazabilidad
-    shutil.copy(ruta_calibracion_npz, os.path.join(ruta_series, 'calibracion_usada.npz'))
-    shutil.copy(ruta_calibracion_meta, os.path.join(ruta_series, 'calibracion_usada.json'))
-    print(f"\nCopia de calibración guardada en series/ para trazabilidad.")
-    
+        print(f"  - Fecha calibración: {metadata_cal['fecha_calibracion']}")
+
     # Mostrar resultado solo si se realizó optimización
     if optimizacion_realizada:
         mask_rango_opt = (wavelengths >= LAMBDA_MIN) & (wavelengths <= LAMBDA_MAX)
@@ -685,10 +704,82 @@ while True:
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        rutas_graficas.append(
-            guardar_y_mostrar_figura(fig_espectro, ruta_series, "espectro_tiempo_integracion")
-        )
-    
+        guardar_y_mostrar_figura(fig_espectro, directorio_calibraciones, "espectro_tiempo_integracion")
+
+    return {
+        "R_0": R_0,
+        "R_1": R_1,
+        "metadata": metadata_cal,
+        "tiempo_integracion": TIEMPO_INTEGRACION,
+    }
+
+
+def registrar_nuevo_sujeto(directorio_raiz):
+    """Crea una carpeta nueva de sujeto y guarda sus metadatos."""
+    ruta_sujeto, sujeto_id = crear_carpeta_sujeto(directorio_raiz)
+
+    print()
+    print("Registro de nuevo sujeto")
+    nombre_sujeto = solicitar_dato_sujeto("Nombre del sujeto: ")
+    edad_sujeto = solicitar_dato_sujeto("Edad del sujeto (años): ")
+    municipio_nacimiento_sujeto = solicitar_dato_sujeto("Municipio de nacimiento: ")
+    fitzpatrick_sujeto = solicitar_dato_sujeto("Fototipo Fitzpatrick (I-VI): ")
+    afecciones_sujeto = solicitar_dato_sujeto("Afecciones conocidas: ")
+
+    ruta_datos_sujeto = guardar_datos_sujeto(
+        ruta_sujeto=ruta_sujeto,
+        sujeto_id=sujeto_id,
+        nombre=nombre_sujeto,
+        edad=edad_sujeto,
+        municipio_nacimiento=municipio_nacimiento_sujeto,
+        fitzpatrick=fitzpatrick_sujeto,
+        afecciones=afecciones_sujeto
+    )
+
+    ruta_salida_iad = os.path.join(ruta_sujeto, "IAD_salida.txt")
+    with open(ruta_salida_iad, "w", encoding="utf-8") as f:
+        f.write("Salida del IAD pendiente de generar.\n")
+
+    print(f"Sujeto registrado en: {ruta_sujeto}")
+    print(f"  - TXT de sujeto: {ruta_datos_sujeto}")
+    print(f"  - Salida IAD: {ruta_salida_iad}")
+
+    return ruta_sujeto, sujeto_id, nombre_sujeto, ruta_datos_sujeto, ruta_salida_iad
+
+
+def medir_region_anatomica(
+    ruta_sujeto,
+    sujeto_id,
+    nombre_sujeto,
+    ruta_datos_sujeto,
+    ruta_salida_iad,
+    region,
+    calibracion_sesion,
+    indice_region,
+    total_regiones,
+):
+    """Ejecuta una medicion single completa para una region anatomica fija."""
+    R_0 = calibracion_sesion["R_0"]
+    R_1 = calibracion_sesion["R_1"]
+
+    ruta_series = os.path.join(ruta_sujeto, region["region_id"])
+    os.makedirs(ruta_series, exist_ok=True)
+    rutas_graficas = []
+
+    print()
+    print("=" * 60)
+    print(f"Sujeto: {nombre_sujeto} (ID: {sujeto_id:03d})")
+    print(f"Region {indice_region}/{total_regiones}: {region['region_label']}")
+    print(f"Carpeta medicion: {ruta_series}")
+    print(region["prompt_colocacion"])
+    input("Presiona Enter cuando la region este colocada correctamente: ")
+
+    ruta_metadata_region = guardar_metadata_region(ruta_series, sujeto_id, region)
+    shutil.copy(ruta_calibracion_npz, os.path.join(ruta_series, 'calibracion_usada.npz'))
+    shutil.copy(ruta_calibracion_meta, os.path.join(ruta_series, 'calibracion_usada.json'))
+    print(f"  - Metadata region: {ruta_metadata_region}")
+    print(f"  - Copia de calibracion guardada para trazabilidad.")
+
     # TOMA DE R_M
     if not confirmar_simple("¿Iniciar serie R_M?"):
         raise SystemExit("Proceso cancelado por el usuario antes de R_M.")
@@ -810,7 +901,7 @@ while True:
     print(f"\nDatos guardados en: {ruta_sujeto}")
     print(f"  - TXT de sujeto: {ruta_datos_sujeto}")
     print(f"  - Salida IAD: {ruta_salida_iad}")
-    print(f"  - Series: {ruta_series}")
+    print(f"  - Region: {ruta_series}")
     
     # Graficar M_R diezmado
     fig_mr_diezmado = plt.figure(figsize=(12, 6))
@@ -834,10 +925,34 @@ while True:
     print("  - Gráficas guardadas:")
     for ruta_grafica in rutas_graficas:
         print(f"    * {ruta_grafica}")
-    
+    return ruta_series
 
-    # Preguntar si se desea realizar otra medición
-    if not confirmar_simple("¿Deseas realizar otra medición?"):
+
+calibracion_sesion = preparar_calibracion_sesion(
+    directorio_calibraciones,
+    ruta_calibracion_npz,
+    ruta_calibracion_meta,
+)
+
+while True:
+    ruta_sujeto, sujeto_id, nombre_sujeto, ruta_datos_sujeto, ruta_salida_iad = registrar_nuevo_sujeto(directorio_raiz)
+
+    for indice_region, region in enumerate(PROTOCOLO_ANATOMICO, 1):
+        medir_region_anatomica(
+            ruta_sujeto=ruta_sujeto,
+            sujeto_id=sujeto_id,
+            nombre_sujeto=nombre_sujeto,
+            ruta_datos_sujeto=ruta_datos_sujeto,
+            ruta_salida_iad=ruta_salida_iad,
+            region=region,
+            calibracion_sesion=calibracion_sesion,
+            indice_region=indice_region,
+            total_regiones=len(PROTOCOLO_ANATOMICO),
+        )
+
+    print()
+    print(f"Mediciones anatomicas completadas para sujeto {sujeto_id:03d}.")
+    if not confirmar_simple("¿Deseas registrar un nuevo sujeto?", default=False):
         break
 
 # Desconexión (atexit maneja el caso de error/excepción)

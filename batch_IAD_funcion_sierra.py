@@ -1,8 +1,10 @@
 from pathlib import Path
+import json
 import os
 import subprocess
 import sys
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
@@ -44,11 +46,18 @@ MODO = "single"   # "single"    → un espectro (M_R_data.csv)
                      # "temporal"  → serie temporal (M_R_tiempo_data.csv)
                      # "batch_all" → procesa TODOS los sujetos en Mediciones/
 
+# Truncado opcional del M_R_data.csv single antes de correr IAD.
+# Rango inclusivo en nm: LAMBDA_MIN <= wavelength_nm <= LAMBDA_MAX.
+TRUNCAR_MR_SINGLE_POR_LAMBDA = True
+MR_SINGLE_LAMBDA_MIN_NM = 430.0
+MR_SINGLE_LAMBDA_MAX_NM = 680.0
+
 # g fijo y N fijo.
 USAR_G_FIJO = True
 G_FIJO = 0.8
 N_TEJIDO = 1.41  # Solo genera el formato; IAD toma la refracción del .rxt/header
 PHAN_UBICACION = "Palm"
+PHAN_UBICACION_DEFAULT = PHAN_UBICACION
 # Opciones: "Forehead", "Cheek", "Ventral Forearm", "Palm", "Back",
 #           "Upper Arm", "Dorsal Forearm", "Neck", "Shin", "Chest"
 # Modo rápido omite el "sanity check" que IAD hace con una simulación Montecarlo.
@@ -67,13 +76,12 @@ PHAN_SIERRA_LAMBDA_REF_NM = 526.0  # λ_ref del ajuste por ley de potencia
 PHAN_MUA_INTERP_MODE = "pchip"
 PHAN_MUA_ALLOW_EXTRAPOLATION = True
 PHAN_MUA_NORM_LAMBDA_REF_NM = 526.0  # λ_ref para normalizar μa_IAD y μa_Phan
-
 # Sensibilidad basada en literatura: escenarios de μs' a computar.
 # Ejemplos:
 # ESCENARIOS_MUSP = ("nominal",)
 # ESCENARIOS_MUSP = ("menos_1sd", "nominal", "mas_1sd")
 ESCENARIOS_MUSP_VALIDOS = ("menos_1sd", "nominal", "mas_1sd")
-ESCENARIOS_MUSP = ("menos_1sd", "nominal", "mas_1sd")
+ESCENARIOS_MUSP = ("nominal",)
 # Escenarios de incertidumbre de medición (σ_M_R por scan).
 # Requiere que M_R_data.csv tenga columna reflectance_std (generada por single_adq.py).
 # Si no existe esa columna, solo "nominal" es válido.
@@ -102,6 +110,15 @@ IAD_EXE_PATH = Path(__file__).parent / "IADSCOTT" / "iad.exe"
 IAD_FOLDER_NAME = "IAD_run"
 # Subcarpeta donde se guardará una corrida por longitud de onda
 IAD_PER_LAMBDA_FOLDER_NAME = "por_lambda"
+
+# Mapeo controlado entre carpetas de adquisicion single y datos Phan-Sierra.
+# "pulgar_izquierdo" se mapea a Palm por decision experimental: piel glabra.
+REGIONES_ANATOMICAS_PHAN = {
+    "pulgar_izquierdo": "Palm",
+    "palma": "Palm",
+    "antebrazo_dorsal": "Dorsal Forearm",
+    "antebrazo_ventral": "Ventral Forearm",
+}
 
 # ============================================================
 # FUNCIÓN PHAN-SIERRA para μs'(λ)
@@ -145,19 +162,56 @@ PHAN_DATOS = {
                         "mua": [0.472, 0.322, 0.158, 0.0883, 0.0649, 0.047, 0.033, 0.0163]},
 }
 
-if PHAN_UBICACION not in PHAN_DATOS:
-    raise ValueError(
-        f"PHAN_UBICACION='{PHAN_UBICACION}' no válida. "
-        f"Opciones: {list(PHAN_DATOS)}"
-    )
-
-_ub = PHAN_DATOS[PHAN_UBICACION]
 PHAN_LAMBDA_NM  = np.array([471.0, 526.0, 591.0, 621.0, 659.0, 691.0, 731.0, 851.0], dtype=float)
-PHAN_MUSP_MM    = np.array(_ub["musp"],    dtype=float)
-PHAN_MUSP_SD_MM = np.array(_ub["musp_sd"], dtype=float)
-PHAN_MUA_MM     = np.array(_ub["mua"],     dtype=float)
-PHAN_POWERLAW_LAMBDA_NM = PHAN_LAMBDA_NM[:-1]
-PHAN_POWERLAW_MUSP_MM = PHAN_MUSP_MM[:-1]
+PHAN_MUSP_MM    = np.array([], dtype=float)
+PHAN_MUSP_SD_MM = np.array([], dtype=float)
+PHAN_MUA_MM     = np.array([], dtype=float)
+PHAN_POWERLAW_LAMBDA_NM = np.array([], dtype=float)
+PHAN_POWERLAW_MUSP_MM = np.array([], dtype=float)
+PHAN_SIERRA_A_MM = float("nan")
+PHAN_SIERRA_B = float("nan")
+_phan_sierra_pchip = None
+_phan_musp_sd_pchip = None
+_phan_mua_pchip = None
+
+
+def configurar_phan_ubicacion(ubicacion: str) -> None:
+    """Actualiza el contexto Phan-Sierra global para una ubicacion anatomica."""
+    global PHAN_UBICACION
+    global PHAN_MUSP_MM, PHAN_MUSP_SD_MM, PHAN_MUA_MM
+    global PHAN_POWERLAW_LAMBDA_NM, PHAN_POWERLAW_MUSP_MM
+    global PHAN_SIERRA_A_MM, PHAN_SIERRA_B
+    global _phan_sierra_pchip, _phan_musp_sd_pchip, _phan_mua_pchip
+
+    if ubicacion not in PHAN_DATOS:
+        raise ValueError(
+            f"PHAN_UBICACION='{ubicacion}' no valida. "
+            f"Opciones: {list(PHAN_DATOS)}"
+        )
+
+    PHAN_UBICACION = ubicacion
+    _ub = PHAN_DATOS[ubicacion]
+    PHAN_MUSP_MM = np.array(_ub["musp"], dtype=float)
+    PHAN_MUSP_SD_MM = np.array(_ub["musp_sd"], dtype=float)
+    PHAN_MUA_MM = np.array(_ub["mua"], dtype=float)
+    PHAN_POWERLAW_LAMBDA_NM = PHAN_LAMBDA_NM[:-1]
+    PHAN_POWERLAW_MUSP_MM = PHAN_MUSP_MM[:-1]
+
+    _x = np.log(PHAN_POWERLAW_LAMBDA_NM / PHAN_SIERRA_LAMBDA_REF_NM)
+    _y = np.log(PHAN_POWERLAW_MUSP_MM)
+    _slope, _intercept = np.polyfit(_x, _y, 1)
+    PHAN_SIERRA_A_MM = float(np.exp(_intercept))
+    PHAN_SIERRA_B = float(-_slope)
+
+    try:
+        from scipy.interpolate import PchipInterpolator
+        _phan_sierra_pchip = PchipInterpolator(PHAN_LAMBDA_NM, PHAN_MUSP_MM, extrapolate=True)
+        _phan_musp_sd_pchip = PchipInterpolator(PHAN_LAMBDA_NM, PHAN_MUSP_SD_MM, extrapolate=True)
+        _phan_mua_pchip = PchipInterpolator(PHAN_LAMBDA_NM, PHAN_MUA_MM, extrapolate=True)
+    except Exception:
+        _phan_sierra_pchip = None
+        _phan_musp_sd_pchip = None
+        _phan_mua_pchip = None
 
 if isinstance(ESCENARIOS_MUSP, str):
     ESCENARIOS_MUSP = (ESCENARIOS_MUSP,)   # "nominal" → ("nominal",)
@@ -183,21 +237,7 @@ if _inv_mr:
 if not ESCENARIOS_MR_STD:
     raise ValueError("ESCENARIOS_MR_STD no puede estar vacío.")
 
-_x = np.log(PHAN_POWERLAW_LAMBDA_NM / PHAN_SIERRA_LAMBDA_REF_NM)
-_y = np.log(PHAN_POWERLAW_MUSP_MM)
-_slope, _intercept = np.polyfit(_x, _y, 1)
-PHAN_SIERRA_A_MM = float(np.exp(_intercept))
-PHAN_SIERRA_B = float(-_slope)
-
-try:
-    from scipy.interpolate import PchipInterpolator
-    _phan_sierra_pchip = PchipInterpolator(PHAN_LAMBDA_NM, PHAN_MUSP_MM, extrapolate=True)
-    _phan_musp_sd_pchip = PchipInterpolator(PHAN_LAMBDA_NM, PHAN_MUSP_SD_MM, extrapolate=True)
-    _phan_mua_pchip = PchipInterpolator(PHAN_LAMBDA_NM, PHAN_MUA_MM, extrapolate=True)
-except Exception:
-    _phan_sierra_pchip = None
-    _phan_musp_sd_pchip = None
-    _phan_mua_pchip = None
+configurar_phan_ubicacion(PHAN_UBICACION_DEFAULT)
 
 # ============================================================
 # FUNCIONES
@@ -223,7 +263,137 @@ def leer_csv_mr(csv_path: Path) -> pd.DataFrame:
 
     df = df[cols].copy()
     df = df.dropna()
+    df = truncar_df_mr_single_por_lambda(df, csv_path)
     return df
+
+
+def truncar_df_mr_single_por_lambda(df: pd.DataFrame, csv_path: Path) -> pd.DataFrame:
+    """Aplica truncado opcional por longitud de onda al M_R_data.csv single."""
+    if not TRUNCAR_MR_SINGLE_POR_LAMBDA:
+        return df
+
+    lambda_min = float(MR_SINGLE_LAMBDA_MIN_NM)
+    lambda_max = float(MR_SINGLE_LAMBDA_MAX_NM)
+    if lambda_min >= lambda_max:
+        raise ValueError(
+            "Rango invalido para truncar M_R single: "
+            f"MR_SINGLE_LAMBDA_MIN_NM={lambda_min} debe ser menor que "
+            f"MR_SINGLE_LAMBDA_MAX_NM={lambda_max}."
+        )
+
+    n_original = len(df)
+    df_truncado = df[
+        (df["wavelength_nm"] >= lambda_min)
+        & (df["wavelength_nm"] <= lambda_max)
+    ].copy()
+
+    if df_truncado.empty:
+        lambda_csv_min = float(df["wavelength_nm"].min()) if not df.empty else float("nan")
+        lambda_csv_max = float(df["wavelength_nm"].max()) if not df.empty else float("nan")
+        raise ValueError(
+            f"El truncado [{lambda_min:.2f}, {lambda_max:.2f}] nm dejó sin puntos a {csv_path}. "
+            f"Rango disponible en CSV: [{lambda_csv_min:.2f}, {lambda_csv_max:.2f}] nm."
+        )
+
+    lambda_trunc_min = float(df_truncado["wavelength_nm"].min())
+    lambda_trunc_max = float(df_truncado["wavelength_nm"].max())
+    if not (lambda_trunc_min <= PHAN_MUA_NORM_LAMBDA_REF_NM <= lambda_trunc_max):
+        raise ValueError(
+            f"El truncado efectivo [{lambda_trunc_min:.2f}, {lambda_trunc_max:.2f}] nm "
+            f"excluye PHAN_MUA_NORM_LAMBDA_REF_NM={PHAN_MUA_NORM_LAMBDA_REF_NM:.2f} nm, "
+            "que se usa para normalizar las métricas de μa. "
+            "Ajusta el rango de truncado o PHAN_MUA_NORM_LAMBDA_REF_NM."
+        )
+
+    print(
+        f"  [M_R] Truncado por lambda: {lambda_min:.2f}-{lambda_max:.2f} nm "
+        f"({len(df_truncado)}/{n_original} puntos) en {csv_path.name}"
+    )
+    return df_truncado
+
+
+def normalizar_region_id(texto: str) -> str:
+    """Normaliza nombres de carpeta a ids estables para mapear anatomia."""
+    texto_ascii = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    texto_limpio = "".join(ch.lower() if ch.isalnum() else "_" for ch in texto_ascii)
+    return "_".join(parte for parte in texto_limpio.split("_") if parte)
+
+
+def phan_ubicacion_para_carpeta_medicion(carpeta_medicion: Path) -> str:
+    """
+    Resuelve la ubicacion Phan-Sierra para una carpeta anatomica single.
+
+    Primero usa metadata_medicion.json si existe; si no, usa el nombre de carpeta.
+    """
+    ruta_metadata = carpeta_medicion / "metadata_medicion.json"
+    if ruta_metadata.exists():
+        with ruta_metadata.open("r", encoding="utf-8") as f:
+            metadata = json.load(f)
+        phan_ubicacion = metadata.get("phan_ubicacion")
+        if phan_ubicacion in PHAN_DATOS:
+            return phan_ubicacion
+        raise ValueError(
+            f"{ruta_metadata} contiene phan_ubicacion='{phan_ubicacion}', "
+            f"pero no existe en PHAN_DATOS. Opciones: {list(PHAN_DATOS)}"
+        )
+
+    region_id = normalizar_region_id(carpeta_medicion.name)
+    if region_id in REGIONES_ANATOMICAS_PHAN:
+        return REGIONES_ANATOMICAS_PHAN[region_id]
+
+    raise ValueError(
+        f"No se pudo mapear la carpeta anatomica '{carpeta_medicion.name}' a Phan-Sierra. "
+        f"Usa una de estas carpetas: {list(REGIONES_ANATOMICAS_PHAN)}. "
+        "Nota: 'antebrazo' solo es ambiguo; usa 'antebrazo_dorsal' o 'antebrazo_ventral'."
+    )
+
+
+def listar_mediciones_single_sujeto(carpeta_sujeto: Path, strict: bool = True) -> list[dict]:
+    """
+    Devuelve las mediciones single de un sujeto.
+
+    Formato viejo: sujeto/series/M_R_data.csv.
+    Formato nuevo: sujeto/<region_anatomica>/M_R_data.csv.
+    """
+    csv_legacy = carpeta_sujeto / "series" / CSV_SINGLE_NAME
+    if csv_legacy.exists():
+        return [
+            {
+                "csv_path": csv_legacy,
+                "output_dir": csv_legacy.parent / "IAD_results",
+                "region_id": "series",
+                "region_label": "series",
+                "phan_ubicacion": PHAN_UBICACION_DEFAULT,
+                "formato": "legacy",
+            }
+        ]
+
+    mediciones = []
+    for subcarpeta in sorted(carpeta_sujeto.iterdir()):
+        if not subcarpeta.is_dir():
+            continue
+        csv_path = subcarpeta / CSV_SINGLE_NAME
+        if not csv_path.exists():
+            continue
+
+        try:
+            phan_ubicacion = phan_ubicacion_para_carpeta_medicion(subcarpeta)
+        except ValueError:
+            if strict:
+                raise
+            continue
+        mediciones.append(
+            {
+                "csv_path": csv_path,
+                "output_dir": subcarpeta / "IAD_results",
+                "region_id": normalizar_region_id(subcarpeta.name),
+                "region_label": subcarpeta.name,
+                "phan_ubicacion": phan_ubicacion,
+                "formato": "anatomico",
+            }
+        )
+
+    return mediciones
 
 
 
@@ -363,7 +533,7 @@ def phan_mu_a_mm(
     mode: str = PHAN_MUA_INTERP_MODE,
     allow_extrapolation: bool = PHAN_MUA_ALLOW_EXTRAPOLATION,
 ):
-    """Interpola μa Palm reportado por Phan a las lambdas deseadas."""
+    """Interpola μa reportado por Phan para la ubicacion activa."""
     return _interp_1d_phan(
         lambda_nm,
         PHAN_MUA_MM,
@@ -479,6 +649,7 @@ def calcular_metricas_mu_a(df_comp: pd.DataFrame) -> dict:
         "n_puntos": int(len(df_comp)),
         "lambda_min_nm": float(df_comp["lambda_nm"].min()),
         "lambda_max_nm": float(df_comp["lambda_nm"].max()),
+        "phan_ubicacion": PHAN_UBICACION,
         "musp_mode": PHAN_SIERRA_MODE,
         "mua_interp_mode": PHAN_MUA_INTERP_MODE,
         "lambda_ref_norm_nm": PHAN_MUA_NORM_LAMBDA_REF_NM,
@@ -673,7 +844,7 @@ def _aplicar_estilo_publicacion(ax):
 
 
 def graficar_phan_sierra(ruta_png: Path, mostrar: bool = False):
-    """Grafica datos Palm de Phan y las dos versiones de Phan-Sierra."""
+    """Grafica datos Phan y las dos versiones de Phan-Sierra para la ubicacion activa."""
     lambda_plot = np.linspace(float(PHAN_LAMBDA_NM.min()), float(PHAN_LAMBDA_NM.max()), 400)
     mu_powerlaw = np.asarray(phan_sierra_mu_sp_mm(lambda_plot, mode="powerlaw"), dtype=float)
     mu_pchip = np.asarray(phan_sierra_mu_sp_mm(lambda_plot, mode="pchip"), dtype=float)
@@ -695,7 +866,7 @@ def graficar_phan_sierra(ruta_png: Path, mostrar: bool = False):
         elinewidth=0.9,
         capsize=2.5,
         capthick=0.9,
-        label="Palm de Phan et al. (media ± sd)",
+        label=f"{PHAN_UBICACION} de Phan et al. (media ± sd)",
     )
     ax.set_xlabel("Longitud de onda (nm)")
     ax.set_ylabel("μs' (1/mm)")
@@ -709,6 +880,22 @@ def graficar_phan_sierra(ruta_png: Path, mostrar: bool = False):
     if GENERAR_GRAFICA_PHAN_SIERRA_PDF:
         plt.savefig(ruta_png.with_suffix(".pdf"), bbox_inches="tight")
     plt.close()
+
+
+def exportar_referencia_phan_sierra(output_dir: Path) -> None:
+    """Guarda la referencia Phan-Sierra activa junto a los resultados IAD."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[Phan-Sierra] ubicacion = {PHAN_UBICACION}")
+    print(f"[Phan-Sierra] modo = {PHAN_SIERRA_MODE}")
+    print(f"[Phan-Sierra] A = {PHAN_SIERRA_A_MM:.8f} mm^-1")
+    print(f"[Phan-Sierra] B = {PHAN_SIERRA_B:.8f}")
+    print(f"[Phan-Sierra] lambda_ref = {PHAN_SIERRA_LAMBDA_REF_NM:.1f} nm")
+    print(f"[Phan-Sierra] extrapolacion permitida = {PHAN_SIERRA_ALLOW_EXTRAPOLATION}")
+    print(f"[Phan-Sierra] extrapolacion sd permitida = {PHAN_MUSP_SD_ALLOW_EXTRAPOLATION}")
+    print(f"[Phan-Sierra] escenarios = {', '.join(ESCENARIOS_MUSP)}")
+
+    tabla_phan_sierra().to_csv(output_dir / "tabla_phan_sierra.csv", index=False)
+    graficar_phan_sierra(output_dir / "grafica_phan_sierra.png")
 
 
 
@@ -980,6 +1167,72 @@ def seleccionar_sujeto(temporal: bool) -> Path:
     return csv_path
 
 
+def seleccionar_sujeto_single() -> tuple[Path, list[dict]]:
+    """
+    Selecciona una carpeta de sujeto single y devuelve todas sus mediciones.
+
+    Soporta el formato viejo sujeto/series/M_R_data.csv y el formato nuevo
+    sujeto/<region_anatomica>/M_R_data.csv.
+    """
+    if not MEDICIONES_DIR.exists():
+        raise FileNotFoundError(f"No existe la carpeta de mediciones: {MEDICIONES_DIR}")
+
+    carpetas = sorted([
+        d for d in MEDICIONES_DIR.iterdir()
+        if d.is_dir() and d.name.startswith("sujeto_") and not d.name.endswith("_temporal")
+    ])
+
+    mediciones_por_sujeto = {}
+    for carpeta in carpetas:
+        mediciones = listar_mediciones_single_sujeto(carpeta, strict=False)
+        if mediciones:
+            mediciones_por_sujeto[carpeta] = mediciones
+
+    carpetas_validas = list(mediciones_por_sujeto)
+    if not carpetas_validas:
+        raise FileNotFoundError(
+            f"No se encontraron sujetos single con {CSV_SINGLE_NAME} en {MEDICIONES_DIR}"
+        )
+
+    if AUTO_ULTIMO_SUJETO:
+        elegida = carpetas_validas[-1]
+        print(f"[Auto] Usando ultimo sujeto single: {elegida.name}")
+    else:
+        print(f"\n{'='*50}")
+        print("  Sujetos disponibles (single)")
+        print(f"{'='*50}")
+        for i, carpeta in enumerate(carpetas_validas, 1):
+            n_mediciones = len(mediciones_por_sujeto[carpeta])
+            print(f"  {i:3d}) {carpeta.name} ({n_mediciones} medicion(es))")
+        print(f"{'='*50}")
+        print(f"  Enter = ultimo ({carpetas_validas[-1].name})")
+
+        seleccion = input("  Teclea el numero del elemento de la lista: ").strip()
+        if seleccion == "":
+            elegida = carpetas_validas[-1]
+        else:
+            try:
+                idx = int(seleccion) - 1
+                if 0 <= idx < len(carpetas_validas):
+                    elegida = carpetas_validas[idx]
+                else:
+                    raise ValueError
+            except ValueError:
+                raise ValueError(
+                    f"Seleccion invalida: '{seleccion}'. "
+                    f"Usa un numero entre 1 y {len(carpetas_validas)}."
+                )
+
+    mediciones = listar_mediciones_single_sujeto(elegida, strict=True)
+    print(f"[Sujeto single] {elegida.name}")
+    for medicion in mediciones:
+        print(
+            f"  - {medicion['region_label']} -> {medicion['phan_ubicacion']} "
+            f"({medicion['csv_path']})"
+        )
+    return elegida, mediciones
+
+
 
 def listar_todos_sujetos() -> list[tuple[Path, bool]]:
     """
@@ -995,10 +1248,11 @@ def listar_todos_sujetos() -> list[tuple[Path, bool]]:
             continue
 
         es_temporal = d.name.endswith("_temporal")
-        csv_name = CSV_TEMPORAL_NAME if es_temporal else CSV_SINGLE_NAME
-        csv_path = d / "series" / csv_name
-
-        if csv_path.exists():
+        if es_temporal:
+            csv_path = d / "series" / CSV_TEMPORAL_NAME
+            if csv_path.exists():
+                resultados.append((d, es_temporal))
+        elif listar_mediciones_single_sujeto(d, strict=False):
             resultados.append((d, es_temporal))
 
     if not resultados:
@@ -1015,8 +1269,15 @@ def procesar_sujeto_single(
     output_dir: Path,
     header_lines: list[str],
     per_lambda_dir: Path,
+    phan_ubicacion: str | None = None,
+    region_id: str | None = None,
 ) -> None:
     """Procesa un sujeto single: IAD por escenarios → CSV + métricas + dashboard."""
+    if phan_ubicacion is not None:
+        configurar_phan_ubicacion(phan_ubicacion)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    exportar_referencia_phan_sierra(output_dir)
     limpiar_carpeta_por_lambda(per_lambda_dir)
 
     df_mr = leer_csv_mr(csv_path)
@@ -1074,6 +1335,11 @@ def procesar_sujeto_single(
                 _progreso(completadas, total, t_inicio)
 
     df_resultados = pd.DataFrame(resultados).sort_values(["escenario", "escenario_mr", "lambda_nm"])
+    if region_id is not None:
+        df_resultados.insert(0, "region_id", region_id)
+        df_resultados.insert(1, "phan_ubicacion", PHAN_UBICACION)
+    else:
+        df_resultados.insert(0, "phan_ubicacion", PHAN_UBICACION)
     ruta_resumen = output_dir / "resumen_resultados_phan_sierra.csv"
     df_resultados.to_csv(ruta_resumen, index=False)
 
@@ -1212,30 +1478,31 @@ def main():
     header_lines = extraer_encabezado_rxt(RXT_TEMPLATE_PATH)
 
     # ------------------------------------------------------------
-    # 4. Referencia Phan-Sierra (una sola vez en IAD_run/)
+    # 4. Configuracion Phan-Sierra
     # ------------------------------------------------------------
-    print(f"[Phan-Sierra] ubicación = {PHAN_UBICACION}")
+    print(f"[Phan-Sierra] ubicacion por defecto = {PHAN_UBICACION_DEFAULT}")
     print(f"[Phan-Sierra] modo = {PHAN_SIERRA_MODE}")
-    print(f"[Phan-Sierra] A = {PHAN_SIERRA_A_MM:.8f} mm^-1")
-    print(f"[Phan-Sierra] B = {PHAN_SIERRA_B:.8f}")
-    print(f"[Phan-Sierra] lambda_ref = {PHAN_SIERRA_LAMBDA_REF_NM:.1f} nm")
-    print(f"[Phan-Sierra] extrapolacion permitida = {PHAN_SIERRA_ALLOW_EXTRAPOLATION}")
-    print(f"[Phan-Sierra] extrapolacion sd permitida = {PHAN_MUSP_SD_ALLOW_EXTRAPOLATION}")
     print(f"[Phan-Sierra] escenarios = {', '.join(ESCENARIOS_MUSP)}")
-
-    ruta_tabla_phan_sierra = iad_dir / "tabla_phan_sierra.csv"
-    tabla_phan_sierra().to_csv(ruta_tabla_phan_sierra, index=False)
-    graficar_phan_sierra(iad_dir / "grafica_phan_sierra.png")
 
     # ============================================================
     # MODO SINGLE — un solo sujeto, un espectro
     # ============================================================
     if MODO == "single":
-        csv_path = seleccionar_sujeto(temporal=False)
-        output_dir = csv_path.parent / "IAD_results"
-        output_dir.mkdir(exist_ok=True)
-        print(f"\n[Single] Procesando → {output_dir}")
-        procesar_sujeto_single(csv_path, output_dir, header_lines, per_lambda_dir)
+        carpeta_sujeto, mediciones = seleccionar_sujeto_single()
+        for i, medicion in enumerate(mediciones, 1):
+            output_dir = medicion["output_dir"]
+            print(f"\n[Single {i}/{len(mediciones)}] {carpeta_sujeto.name} / {medicion['region_label']}")
+            print(f"  CSV: {medicion['csv_path']}")
+            print(f"  Phan-Sierra: {medicion['phan_ubicacion']}")
+            print(f"  Resultados: {output_dir}")
+            procesar_sujeto_single(
+                medicion["csv_path"],
+                output_dir,
+                header_lines,
+                per_lambda_dir,
+                phan_ubicacion=medicion["phan_ubicacion"],
+                region_id=medicion["region_id"],
+            )
 
     # ============================================================
     # MODO TEMPORAL — un solo sujeto, serie temporal
@@ -1244,6 +1511,7 @@ def main():
         csv_path = seleccionar_sujeto(temporal=True)
         output_dir = csv_path.parent / "IAD_results"
         output_dir.mkdir(exist_ok=True)
+        exportar_referencia_phan_sierra(iad_dir)
         print(f"\n[Temporal] Procesando → {output_dir}")
         procesar_sujeto_temporal(csv_path, output_dir, header_lines, per_lambda_dir)
 
@@ -1255,11 +1523,6 @@ def main():
         print(f"\n[Batch] {len(sujetos)} sujetos encontrados en {MEDICIONES_DIR}")
 
         for i, (carpeta, es_temporal) in enumerate(sujetos, 1):
-            csv_name = CSV_TEMPORAL_NAME if es_temporal else CSV_SINGLE_NAME
-            csv_path = carpeta / "series" / csv_name
-            output_dir = carpeta / "series" / "IAD_results"
-            output_dir.mkdir(exist_ok=True)
-
             tipo = "temporal" if es_temporal else "single"
             print(f"\n{'='*60}")
             print(f"[Batch {i}/{len(sujetos)}] {carpeta.name} ({tipo})")
@@ -1267,9 +1530,26 @@ def main():
 
             try:
                 if es_temporal:
+                    csv_path = carpeta / "series" / CSV_TEMPORAL_NAME
+                    output_dir = carpeta / "series" / "IAD_results"
+                    output_dir.mkdir(exist_ok=True)
+                    exportar_referencia_phan_sierra(iad_dir)
                     procesar_sujeto_temporal(csv_path, output_dir, header_lines, per_lambda_dir)
                 else:
-                    procesar_sujeto_single(csv_path, output_dir, header_lines, per_lambda_dir)
+                    mediciones = listar_mediciones_single_sujeto(carpeta)
+                    for j, medicion in enumerate(mediciones, 1):
+                        print(
+                            f"\n  [Single {j}/{len(mediciones)}] "
+                            f"{medicion['region_label']} -> {medicion['phan_ubicacion']}"
+                        )
+                        procesar_sujeto_single(
+                            medicion["csv_path"],
+                            medicion["output_dir"],
+                            header_lines,
+                            per_lambda_dir,
+                            phan_ubicacion=medicion["phan_ubicacion"],
+                            region_id=medicion["region_id"],
+                        )
             except Exception as e:
                 print(f"  [ERROR] {carpeta.name}: {e}")
                 continue
@@ -1279,7 +1559,7 @@ def main():
     else:
         raise ValueError(f"MODO desconocido: '{MODO}'. Usa 'single', 'temporal' o 'batch_all'.")
 
-    print(f"\nReferencia Phan-Sierra en: {iad_dir}")
+    print(f"\nTrabajo IAD temporal/scratch en: {iad_dir}")
 
 
 if __name__ == "__main__":
